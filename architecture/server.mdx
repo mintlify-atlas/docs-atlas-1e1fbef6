@@ -1,0 +1,144 @@
+---
+title: "CC-GUI Server: Express, Socket.IO, and node-pty Internals"
+description: "Deep dive into the CC-GUI server layer — Express setup, Socket.IO wiring, node-pty PTY management, JSON store, worktrees, and transcript watching."
+---
+
+The CC-GUI server is a single Node.js process that owns every piece of mutable state: running terminals, persisted projects and sessions, git worktrees, and Claude transcript watchers. It exposes a REST API for mutations and a Socket.IO connection for real-time bidirectional communication with the React client.
+
+## Startup and wiring
+
+`server/index.js` is the entrypoint. On startup it:
+
+1. Reads safe-mode config from environment variables via `buildSafeModeConfig`.
+2. Loads or creates the auth token at `~/.cc-gui/auth-token`.
+3. Creates the Express app and HTTP server, then attaches Socket.IO with CORS origin checking.
+4. Installs Socket.IO auth middleware (`socketAuthMiddleware`) and Express auth middleware (`authMiddleware`) — all protected routes and socket connections require the bearer token.
+5. Instantiates every module in dependency order.
+6. Calls `wireNotifications`, `registerRoutes`, and `registerSocketHandlers` to attach behavior.
+7. Resets any sessions that were marked `active`/`working`/`waiting` at last shutdown (they have no live PTY).
+8. Starts listening on `PORT` (default `3456`) bound to `safeModeConfig.host` (`127.0.0.1` in safe mode).
+
+```js
+// Dependency instantiation order (server/index.js)
+const store           = new Store(path.join(dataDir, 'store.json'));
+const terminalManager = new TerminalManager({ dataDir });
+const stateDetector   = new StateDetector();
+const orchestrator    = new Orchestrator({ stateDetector });
+const gitMonitor      = new GitMonitor();
+const aiOrchestrator  = new AIOrchestrator({ terminalManager, gitMonitor, store, safeModeConfig });
+const worktreeManager = new WorktreeManager();
+```
+
+After construction, the three wiring calls connect the modules to Socket.IO:
+
+```js
+wireNotifications(io, { store, stateDetector, orchestrator, aiOrchestrator, waitingNotified });
+registerRoutes(app, { store, aiOrchestrator, worktreeManager, terminalManager, io, cleanupSessionState, safeModeConfig });
+registerSocketHandlers(io, { store, terminalManager, stateDetector, orchestrator, aiOrchestrator, ... });
+```
+
+## node-pty and the TerminalManager
+
+`server/terminal-manager.js` wraps `node-pty` to spawn real PTY processes — not simulated shells. Each session gets its own PTY with a 120×30 default size.
+
+When `create()` is called, the manager:
+
+- Augments `PATH` with `~/.local/bin`, `~/.npm-global/bin`, and `/usr/local/bin` so `claude` is always found.
+- Spawns the PTY via `pty.spawn(command, args, { name: 'xterm-256color', cols: 120, rows: 30, cwd, env })`.
+- Accumulates output into an in-memory scrollback buffer (capped at `SCROLLBACK_LIMIT`).
+- Debounces scrollback persistence to `data/scrollback/<sessionId>.buf` every 5 seconds to avoid excessive disk writes.
+- On exit, preserves the scrollback so re-attaching a dead session still shows its last output.
+
+```js
+// Spawning a PTY (terminal-manager.js)
+const ptyProcess = pty.spawn(command || shell, args, {
+  name: 'xterm-256color',
+  cols: 120,
+  rows: 30,
+  cwd: cwd || process.env.HOME,
+  env,
+});
+```
+
+`resize(sessionId, cols, rows)` forwards terminal resize events from the client directly to the PTY, keeping the xterm.js viewport in sync.
+
+<Note>
+  `node-pty` compiles native code and requires a C/C++ toolchain. On macOS run `xcode-select --install`; on Linux install `build-essential` and `python3`.
+</Note>
+
+## JSON store
+
+`server/store.js` persists all projects and sessions to `data/store.json`. Writes are always atomic:
+
+1. The current file is copied to `data/store.json.bak`.
+2. New content is written to `data/store.json.tmp`.
+3. `fs.renameSync` moves the temp file into place.
+
+Writes are debounced by 100 ms to coalesce rapid back-to-back updates (common when many session statuses change together). On load, if the primary file is missing or empty, the store falls back to the `.bak` automatically.
+
+```json
+// data/store.json shape
+{
+  "projects": {
+    "<uuid>": {
+      "id": "<uuid>",
+      "name": "my-project",
+      "path": "/home/user/projects/my-project",
+      "region": "PALLET",
+      "starters": ["Bulbasaur", "Charmander", "Squirtle"],
+      "createdAt": "2025-01-01T00:00:00.000Z"
+    }
+  },
+  "sessions": {
+    "<uuid>": {
+      "id": "<uuid>",
+      "projectId": "<project-uuid>",
+      "name": "feat/auth",
+      "command": "claude",
+      "sessionType": "claude",
+      "status": "idle",
+      "starter": "Bulbasaur",
+      "createdAt": "2025-01-01T00:00:00.000Z"
+    }
+  }
+}
+```
+
+## Worktree management
+
+`server/worktree-manager.js` manages git worktrees for session isolation. Each session can be associated with its own worktree, keeping branches and working trees independent so multiple Claude agents can operate on the same repository without stepping on each other.
+
+<Tip>
+  Worktrees are created automatically when you spawn a session on a git repository. The worktree root is placed at `~/.cc-gui/worktrees/<sessionId>`, keeping all session working trees in a single central location rather than inside the project directory.
+</Tip>
+
+## Transcript watching
+
+Claude Code writes a JSON transcript file to `~/.claude/projects/<project-hash>/` while a session is running. `server/transcript-watcher.js` tails these files using `fs.watch` and emits structured state events as each new JSON line appears.
+
+`server/state-detector.js` consumes those events alongside raw PTY bytes to produce granular states:
+
+| Transcript state | Meaning |
+|---|---|
+| `thinking` | Claude is generating a response |
+| `tool_running` | A tool call is in progress |
+| `responding` | Claude is streaming a reply |
+| `compacting` | Context window is being compacted |
+| `api_retry` | An API call is being retried |
+| `waiting` | Claude returned the prompt to the user |
+| `error` | A terminal error state (rate limit, billing, auth, max turns, etc.) |
+
+The transcript is the authoritative source; PTY-based detection (spinner characters, OSC title sequences, prompt characters) fills the gap when the transcript lags or is unavailable.
+
+## Graceful shutdown
+
+`SIGTERM` and `SIGINT` both trigger a shutdown sequence: all PTY processes are killed, transcript watchers and the git monitor are stopped, and the HTTP server is closed. A 5-second hard-exit timer ensures the process terminates even if `server.close()` hangs.
+
+<CardGroup cols={2}>
+  <Card title="Architecture overview" icon="sitemap" href="/architecture/overview">
+    See how the server fits into the full system.
+  </Card>
+  <Card title="Orchestrator internals" icon="list-ol" href="/architecture/orchestrator">
+    How terminal output becomes a priority ranking.
+  </Card>
+</CardGroup>

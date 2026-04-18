@@ -1,0 +1,64 @@
+---
+title: "Keyboard Shortcuts for Faster Navigation in CC-GUI"
+description: "Master CC-GUI's global keyboard shortcuts to open projects, spawn sessions, jump to priority sessions, and dismiss overlays without touching the mouse."
+---
+
+CC-GUI is designed to keep your hands on the keyboard. A small set of global shortcuts covers the most common actions: opening a new project, spawning a session on the active project, jumping directly into a session that needs your attention, and dismissing whatever is currently open. All shortcuts fire on `keydown` and are intentionally minimal so they never conflict with the Claude Code CLI running inside the terminal.
+
+## Reference table
+
+| Key | Action |
+|-----|--------|
+| `N` | Open the **New Project** dialog (same as clicking **+ TABLE** in the HUD) |
+| `S` | Quick-spawn a session on the active project |
+| `1` – `9` | Jump to the Nth session in the priority queue |
+| `ESC` | Close / back — see the dismissal order below |
+
+## How `ESC` works
+
+`ESC` follows a layered dismissal order so you can always back out cleanly:
+
+<Steps>
+  <Step title="Confirm dialog">
+    If a confirmation prompt is open (e.g. "Release this Pokémon?"), `ESC` dismisses it.
+  </Step>
+  <Step title="Dialog">
+    If any other dialog is open (New Project, New Session, table menu), `ESC` closes it.
+  </Step>
+  <Step title="Terminal overlay">
+    If the terminal is open, `ESC` closes it and returns you to the agent grid.
+  </Step>
+  <Step title="Session carousel">
+    If the GALLERY carousel is open, `ESC` closes it.
+  </Step>
+</Steps>
+
+## How `1`–`9` works
+
+The number keys map to the **priority queue** maintained by the server-side orchestrator — not to the visual position of cards in the grid. Only sessions at priority level 2 (HIGH) or above are reachable this way, so pressing `1` always takes you to the session that needs your attention most urgently.
+
+<Tip>
+  The **Activity** sidebar on the right displays the same priority queue with visual indicators. Use it to see which slot each session currently holds before pressing a number key.
+</Tip>
+
+## When shortcuts are disabled
+
+Shortcuts are suspended in two situations to prevent accidental keystrokes from interfering with your work:
+
+- **While a terminal is open** — every keystroke goes directly to the PTY. `ESC` is the only key that still works (it closes the terminal).
+- **While an input field is focused** — typing in any `<input>`, `<textarea>`, or `<select>` element suppresses all shortcuts so you can type freely.
+
+Modifier keys (`Cmd`, `Ctrl`, `Alt`, `Shift`) also block shortcuts, so `Cmd+S` does not trigger a session spawn.
+
+## Live reference in the HUD
+
+Click the **?** button in the HUD at any time to open an in-app shortcut reference overlay. It reflects the current state of the app, including which session each number key maps to.
+
+<CardGroup cols={2}>
+  <Card title="Concepts: Agent Grid" icon="grid-2" href="/concepts/agent-grid">
+    Understand how sessions are sorted by priority and displayed in the grid.
+  </Card>
+  <Card title="Concepts: Activity Sidebar" icon="sidebar-right" href="/concepts/activity-sidebar">
+    See the cross-project priority queue that the number keys index into.
+  </Card>
+</CardGroup>

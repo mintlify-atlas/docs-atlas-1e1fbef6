@@ -1,0 +1,322 @@
+---
+title: "REST API reference for CC-GUI projects"
+description: "Create, read, delete, and discover CC-GUI projects via HTTP. Includes conflict detection and bulk PR creation for all sessions in a project."
+---
+
+Projects are the top-level organizational unit in CC-GUI — each project maps to a directory on your local file system and can contain many sessions. The projects API lets you manage this collection programmatically: create projects from scripts, poll for conflicts before merging, or trigger bulk PR creation from CI.
+
+All requests require the `Authorization: Bearer <token>` header. See [authentication](/configuration/authentication) for how to retrieve your token.
+
+## GET /api/projects
+
+Returns an array of all projects currently stored in CC-GUI.
+
+```bash
+curl http://localhost:3456/api/projects \
+  -H "Authorization: Bearer <token>"
+```
+
+**Response**
+
+```json
+[
+  {
+    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "name": "my-app",
+    "path": "/Users/you/code/my-app",
+    "region": "Kanto",
+    "starters": ["bulbasaur", "charmander", "squirtle"],
+    "createdAt": "2025-01-15T10:00:00.000Z"
+  }
+]
+```
+
+<ResponseField name="id" type="string" required>
+  UUID that uniquely identifies this project.
+</ResponseField>
+
+<ResponseField name="name" type="string" required>
+  Display name for the project, shown in the agent grid header.
+</ResponseField>
+
+<ResponseField name="path" type="string" required>
+  Absolute path to the project directory on the local file system.
+</ResponseField>
+
+<ResponseField name="region" type="string" required>
+  Pokémon region name (e.g. `"Kanto"`, `"Johto"`, `"Hoenn"`) assigned round-robin across the 8 available regions on creation.
+</ResponseField>
+
+<ResponseField name="starters" type="string[]" required>
+  The three starter Pokémon names for this project's region (e.g. `["bulbasaur", "charmander", "squirtle"]`). Sessions cycle through these names as their agent identifier.
+</ResponseField>
+
+<ResponseField name="createdAt" type="string" required>
+  ISO 8601 timestamp of when the project was created.
+</ResponseField>
+
+---
+
+## POST /api/projects
+
+Creates a new project. CC-GUI verifies that the path exists on disk before saving.
+
+**Request body**
+
+<ParamField body="name" type="string" required>
+  Display name for the project.
+</ParamField>
+
+<ParamField body="path" type="string" required>
+  Path to the project directory. Tilde expansion is supported (e.g. `~/code/my-app`). The path must exist on disk at the time of the request.
+</ParamField>
+
+```bash
+curl -X POST http://localhost:3456/api/projects \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "my-app", "path": "~/code/my-app"}'
+```
+
+**Response** — the newly created project object (same shape as in `GET /api/projects`).
+
+```json
+{
+  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "name": "my-app",
+  "path": "/Users/you/code/my-app",
+  "region": "Kanto",
+  "starters": ["bulbasaur", "charmander", "squirtle"],
+  "createdAt": "2025-01-15T10:00:00.000Z"
+}
+```
+
+**Error responses**
+
+| Status | Body | Reason |
+|--------|------|--------|
+| `400` | `{ "error": "name and path required" }` | Either `name` or `path` was omitted. |
+| `400` | `{ "error": "Path does not exist: ..." }` | The resolved path does not exist on disk. |
+
+<Tip>
+  After a successful create, CC-GUI broadcasts `projects:updated` to all connected Socket.IO clients automatically.
+</Tip>
+
+---
+
+## DELETE /api/projects/:id
+
+Deletes a project and all of its sessions. For each session:
+
+1. The PTY process is killed.
+2. The git worktree is removed (if one was created).
+3. The session branch is deleted from the project repository.
+4. Session state is cleaned up and removed from the store.
+
+<Warning>
+  This operation is irreversible. All sessions belonging to the project — including their git worktrees and branches — are permanently removed.
+</Warning>
+
+**Path parameters**
+
+<ParamField path="id" type="string" required>
+  The project ID returned by `POST /api/projects` or `GET /api/projects`.
+</ParamField>
+
+```bash
+curl -X DELETE http://localhost:3456/api/projects/a1b2c3d4-e5f6-7890-abcd-ef1234567890 \
+  -H "Authorization: Bearer <token>"
+```
+
+**Response**
+
+```json
+{ "ok": true }
+```
+
+**Error responses**
+
+| Status | Body | Reason |
+|--------|------|--------|
+| `404` | `{ "error": "not found" }` | No project with the given ID exists. |
+
+---
+
+## GET /api/projects/:id/conflicts
+
+Returns file overlap and merge conflict information across all sessions in a project. The data is computed by the AI orchestrator and reflects the most recent analysis pass.
+
+**Path parameters**
+
+<ParamField path="id" type="string" required>
+  The project ID.
+</ParamField>
+
+```bash
+curl http://localhost:3456/api/projects/a1b2c3d4-e5f6-7890-abcd-ef1234567890/conflicts \
+  -H "Authorization: Bearer <token>"
+```
+
+**Response**
+
+```json
+{
+  "overlaps": [
+    {
+      "file": "src/index.ts",
+      "sessions": ["session-id-1", "session-id-2"]
+    }
+  ],
+  "mergeConflicts": [
+    {
+      "file": "src/utils.ts",
+      "sessions": ["session-id-1", "session-id-3"]
+    }
+  ]
+}
+```
+
+<ResponseField name="overlaps" type="object[]">
+  Files touched by more than one session in this project. Each entry has a `file` path and a `sessions` array of session IDs.
+</ResponseField>
+
+<ResponseField name="mergeConflicts" type="object[]">
+  Files with detected merge conflicts. Each entry has a `file` path and a `sessions` array of session IDs.
+</ResponseField>
+
+<Note>
+  If no conflict data has been computed yet, the response is `{ "overlaps": [], "mergeConflicts": [] }`.
+</Note>
+
+---
+
+## POST /api/projects/:id/create-prs
+
+Creates GitHub pull requests for every session in the project that has uncommitted changes on its branch. Equivalent to calling `POST /api/sessions/:id/create-pr` for each session individually.
+
+**Path parameters**
+
+<ParamField path="id" type="string" required>
+  The project ID.
+</ParamField>
+
+```bash
+curl -X POST http://localhost:3456/api/projects/a1b2c3d4-e5f6-7890-abcd-ef1234567890/create-prs \
+  -H "Authorization: Bearer <token>"
+```
+
+**Response**
+
+```json
+{
+  "success": true,
+  "results": [
+    {
+      "sessionId": "session-id-1",
+      "prUrl": "https://github.com/owner/repo/pull/42"
+    },
+    {
+      "sessionId": "session-id-2",
+      "prUrl": "https://github.com/owner/repo/pull/43"
+    }
+  ]
+}
+```
+
+<ResponseField name="success" type="boolean" required>
+  `true` if the operation completed without a top-level error (individual sessions may still fail).
+</ResponseField>
+
+<ResponseField name="results" type="object[]">
+  Per-session outcome. Each entry includes `sessionId` and either `prUrl` (on success) or `error` (on failure).
+</ResponseField>
+
+<Tip>
+  You can also trigger this via Socket.IO by emitting `ai:create-all-prs` with `{ projectId }`. See [orchestrator API](/api/orchestrator) for details.
+</Tip>
+
+---
+
+## GET /api/discover
+
+Scans the home directory (up to 3 levels deep) for git repositories and optionally fetches your GitHub repos via the `gh` CLI. Results are cached for 30 seconds to avoid excessive file-system and network calls. Repositories already registered as projects in CC-GUI are excluded from the results.
+
+```bash
+curl http://localhost:3456/api/discover \
+  -H "Authorization: Bearer <token>"
+```
+
+**Response**
+
+```json
+{
+  "local": [
+    {
+      "name": "side-project",
+      "path": "/Users/you/code/side-project",
+      "source": "local"
+    }
+  ],
+  "github": [
+    {
+      "name": "my-app",
+      "nameWithOwner": "you/my-app",
+      "url": "https://github.com/you/my-app",
+      "path": "/Users/you/code/my-app",
+      "source": "both"
+    },
+    {
+      "name": "remote-only",
+      "nameWithOwner": "you/remote-only",
+      "url": "https://github.com/you/remote-only",
+      "path": null,
+      "source": "github"
+    }
+  ]
+}
+```
+
+<ResponseField name="local" type="object[]">
+  Local git repositories that are not already registered as CC-GUI projects and not found in the GitHub list.
+
+  <Expandable title="local item fields">
+    <ResponseField name="name" type="string">Directory name of the repository.</ResponseField>
+    <ResponseField name="path" type="string">Absolute path on disk.</ResponseField>
+    <ResponseField name="source" type="string">Always `"local"` for items in this array.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="github" type="object[]">
+  Repositories returned by `gh repo list`. Repos already registered as CC-GUI projects are excluded.
+
+  <Expandable title="github item fields">
+    <ResponseField name="name" type="string">Repository name.</ResponseField>
+    <ResponseField name="nameWithOwner" type="string">GitHub `owner/name` path.</ResponseField>
+    <ResponseField name="url" type="string">Full GitHub URL.</ResponseField>
+    <ResponseField name="path" type="string | null">Local path if the repo is also cloned locally; `null` otherwise.</ResponseField>
+    <ResponseField name="source" type="string">`"both"` if found locally and on GitHub; `"github"` if remote-only.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<Note>
+  GitHub discovery requires the `gh` CLI to be installed and authenticated. If `gh` is unavailable, the `github` array is empty and a warning is logged to the server console.
+</Note>
+
+---
+
+## Related pages
+
+<CardGroup cols={2}>
+  <Card title="Sessions API" icon="rectangle-terminal" href="/api/sessions">
+    Create and manage individual Claude Code sessions within a project.
+  </Card>
+  <Card title="Orchestrator API" icon="sliders" href="/api/orchestrator">
+    Real-time conflict and PR status events pushed over Socket.IO.
+  </Card>
+  <Card title="PR workflow guide" icon="code-pull-request" href="/guides/pr-workflow">
+    Step-by-step guide to using git worktrees and PRs with CC-GUI.
+  </Card>
+  <Card title="API overview" icon="book" href="/api/overview">
+    Full endpoint index and Socket.IO event list in one place.
+  </Card>
+</CardGroup>

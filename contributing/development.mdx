@@ -1,0 +1,140 @@
+---
+title: "Contributing to CC-GUI: Development Setup and Workflow"
+description: "Everything you need to contribute to CC-GUI — cloning, installing, running the dev server, code style conventions, and opening a pull request."
+---
+
+CC-GUI welcomes bug reports, fixes, and small features. The project uses plain ES modules throughout, keeps types in JSDoc rather than TypeScript, and has no enforced formatter — the bar to contribute is intentionally low. This page walks through the complete development workflow from first clone to merged pull request.
+
+## Getting started
+
+Before cloning, make sure you have the prerequisites from the [installation guide](/quickstart):
+
+- **Node.js 18+** — `node --version`
+- **A C/C++ toolchain** — required by `node-pty`. macOS: `xcode-select --install`. Linux: `sudo apt install build-essential python3`.
+- **Claude Code CLI** — needed if you want to run real sessions during development.
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/Haroutkhac/CC-GUI.git
+    cd CC-GUI
+    ```
+  </Step>
+  <Step title="Install dependencies">
+    ```bash
+    npm install
+    ```
+    `node-pty` compiles native bindings during install. If this fails, check the C/C++ toolchain requirement above.
+  </Step>
+  <Step title="Create the data store">
+    ```bash
+    cp data/store.example.json data/store.json
+    ```
+    The server reads `data/store.json` on startup. Without this file it starts with an empty store, which is fine, but the example gives you sample projects to work with immediately.
+  </Step>
+  <Step title="Start the development servers">
+    ```bash
+    npm run dev
+    ```
+    This starts two processes concurrently:
+    - **API server** on `http://localhost:3456` — Express + Socket.IO
+    - **Vite dev server** on `http://localhost:5173` — React with hot reload
+
+    Open **http://localhost:5173** in your browser.
+  </Step>
+</Steps>
+
+## Development workflow
+
+<Steps>
+  <Step title="Create a branch">
+    Branch off `main` using a descriptive name:
+
+    ```bash
+    git checkout -b feat/short-description
+    # or
+    git checkout -b fix/short-description
+    ```
+  </Step>
+  <Step title="Make your changes">
+    Make your edits. The Vite dev server provides hot module replacement for React changes. Server-side changes require restarting the `npm run dev` process manually (`Ctrl+C`, then `npm run dev` again) since the server runs plain `node` without a file watcher.
+  </Step>
+  <Step title="Run the test suite">
+    ```bash
+    npm test
+    ```
+    All tests must pass before you open a PR. See [Testing](/contributing/testing) for details on writing and running tests.
+  </Step>
+  <Step title="Verify in the browser">
+    For any user-visible change, open `http://localhost:5173` and confirm the behavior works end-to-end. The terminal overlay, agent grid sort order, and sidebar queue are the most important surfaces to check.
+  </Step>
+  <Step title="Commit with a conventional message">
+    Use a conventional commit prefix so the changelog stays readable:
+
+    ```bash
+    git commit -m "feat: add session rename from agent card"
+    git commit -m "fix: orchestrator false-positive on markdown bold"
+    git commit -m "docs: add orchestrator internals page"
+    git commit -m "refactor: extract priority labels to constants"
+    git commit -m "test: cover api_retry state in orchestrator"
+    git commit -m "chore: update node-pty to 1.0.0"
+    ```
+  </Step>
+  <Step title="Open a pull request against main">
+    Push your branch and open a PR with a clear description of what changed and why. Include steps to reproduce for bug fixes and a before/after screenshot for UI changes.
+  </Step>
+</Steps>
+
+## Code style
+
+CC-GUI has no enforced formatter, so the rule is simple: **match the surrounding code**.
+
+- **ES modules throughout** — the root `package.json` sets `"type": "module"`, so every file uses `import`/`export`. No CommonJS `require()`.
+- **JSDoc over TypeScript** — types live in `shared/types.js` and `server/types.js`. Annotate new functions with `@param` and `@returns` JSDoc comments rather than converting files to TypeScript.
+- **Prefer editing existing files** — keep modules focused. Adding behavior to an existing handler is almost always better than creating a new file.
+- **No new dependencies without discussion** — `node-pty`, `socket.io`, and `express` are core. Other additions should be raised in the PR description.
+
+```js
+// Good: JSDoc annotation on a new server function
+/**
+ * @param {string} sessionId
+ * @param {string} rawData
+ * @param {SessionMeta} meta
+ */
+export function processOutput(sessionId, rawData, meta) { ... }
+```
+
+## Safe mode defaults
+
+<Warning>
+  CC-GUI spawns real terminal processes and provides full shell access through the browser. Default safe-mode behavior — loopback bind, localhost-only CORS, auto-respond disabled, protected-agent approvals — **must stay intact**.
+
+  If your change would relax any of these defaults, call it out explicitly in the PR description. Such changes require extra scrutiny.
+</Warning>
+
+The relevant defaults enforced by `buildSafeModeConfig` in `server/utils.js`:
+
+| Setting | Safe-mode default |
+|---|---|
+| `HOST` | `127.0.0.1` (loopback only) |
+| `ALLOWED_ORIGINS` | `http://localhost:5173`, `http://127.0.0.1:5173` |
+| `AUTO_RESPOND` | Off |
+| Protected-agent approvals | Manual |
+
+## Reporting bugs
+
+Open an issue and include:
+
+- OS and Node version (`node --version`)
+- `claude --version` if the bug involves a session
+- Steps to reproduce
+- Relevant server log output — redact the auth token before pasting
+
+<CardGroup cols={2}>
+  <Card title="Testing" icon="flask" href="/contributing/testing">
+    How to write and run tests with vitest.
+  </Card>
+  <Card title="Architecture overview" icon="sitemap" href="/architecture/overview">
+    Understand the codebase before diving in.
+  </Card>
+</CardGroup>

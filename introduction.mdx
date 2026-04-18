@@ -1,0 +1,39 @@
+---
+title: "CC-GUI: a retro dashboard for Claude Code sessions"
+description: "CC-GUI is a browser dashboard for running multiple Claude Code sessions in parallel, organized by project with a retro Pokémon-inspired interface."
+---
+
+CC-GUI is a retro-themed browser dashboard that lets you spawn, monitor, and interact with multiple Claude Code CLI sessions at the same time. Instead of juggling separate terminal windows, you get a single interface where every session shows its live state, current summary, and priority — so you always know which agent needs your attention next.
+
+The interface borrows its metaphor from Pokémon: **projects are Tables** (like tables at a tournament), and **sessions are Pokémon** — each one fighting its own battle in a real PTY. The agent grid sorts your sessions by urgency, the activity sidebar keeps a cross-project priority queue in view at all times, and clicking any card drops you into a full xterm.js terminal.
+
+## Key features
+
+**Agent grid** — the main view for the active project. Cards are sorted automatically by priority (urgent → waiting → working → idle) and show live state, a one-line summary, the current branch, and PR controls.
+
+**Activity sidebar** — a persistent rail on the right that aggregates alerts and a priority queue across every project. Click any queued item to jump straight into its terminal.
+
+**Real PTY terminals** — sessions run as actual pseudoterminals via `node-pty`, streamed over Socket.IO. Typing, approving tool use, and running commands all work exactly as they do in your own shell.
+
+**Project discovery** — the project picker scans your local git repos (3 levels deep from home) and, if you have the GitHub CLI installed, your GitHub account. Add a project in one click or type an absolute path.
+
+**Mobile support** — the terminal overlay supports swipe navigation between sessions and touch-friendly controls, so you can triage from your phone.
+
+**Safe mode** — the server binds to `127.0.0.1` by default and enforces strict CORS and origin rules. A `SAFE MODE ON` banner in the HUD makes the current posture visible at all times.
+
+## Explore the docs
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get CC-GUI running in under five minutes.
+  </Card>
+  <Card title="Agent grid" icon="grid-2x2" href="/concepts/agent-grid">
+    Understand how sessions are ranked and displayed.
+  </Card>
+  <Card title="Terminal overlay" icon="terminal" href="/concepts/terminal">
+    Learn how the xterm.js terminal works, including mobile gestures.
+  </Card>
+  <Card title="Safe mode" icon="shield" href="/configuration/safe-mode">
+    Configure network binding, CORS, and protected agent commands.
+  </Card>
+</CardGroup>

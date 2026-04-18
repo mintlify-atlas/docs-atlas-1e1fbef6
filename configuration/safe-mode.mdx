@@ -1,0 +1,91 @@
+---
+title: "Safe mode: controlling network access and agent approvals"
+description: "Safe mode keeps CC-GUI bound to localhost, restricts CORS origins, and requires manual approvals for protected agent commands like Codex and OpenAI."
+---
+
+CC-GUI spawns real terminal processes and streams them to the browser, which means the server has the same level of access to your machine as your own shell. Safe mode is the default posture: it locks the server to `127.0.0.1`, enforces strict CORS rules, and adds an approval gate for sessions running protected agent commands. The `SAFE MODE ON` banner in the HUD makes the active posture visible at all times so you always know how the server is exposed.
+
+## What safe mode enforces
+
+When `OPENAI_SAFE_MODE=true` (the default), the server applies all of the following at startup:
+
+- **Server binds to `127.0.0.1`** — the listening socket is loopback-only; no other network interface can reach it.
+- **CORS restricted to explicit local origins** — allowed origins default to `http://localhost:5173`, `http://127.0.0.1:5173`, `http://localhost:3456`, and `http://127.0.0.1:3456`. Wildcard (`*`) origins are explicitly rejected.
+- **Auto-respond starts disabled** — the AI orchestrator's auto-respond feature is off by default, so sessions do not respond to prompts without your input.
+- **Protected agent sessions require manual approvals** — sessions running commands listed in `PROTECTED_AGENT_COMMANDS` (default: `codex`, `openai`) are classified as `protected_agent` and will not proceed past confirmation prompts automatically.
+- **`SAFE MODE ON` banner in the HUD** — the top bar displays a persistent indicator so you can always confirm the server's current posture at a glance.
+
+## HOST restriction
+
+In safe mode, if you set `HOST` to any address other than `127.0.0.1`, the server will refuse to start and print an error:
+
+```
+OPENAI_SAFE_MODE forbids HOST=<your-address>. Use HOST=127.0.0.1 or set ALLOW_UNSAFE_REMOTE=true.
+```
+
+To bind to a non-local address while safe mode is on, you must explicitly set `ALLOW_UNSAFE_REMOTE=true`. This is an intentional two-step so you cannot accidentally expose the server to a network.
+
+```bash
+ALLOW_UNSAFE_REMOTE=true HOST=0.0.0.0 npm run dev
+```
+
+<Warning>
+Setting `ALLOW_UNSAFE_REMOTE=true` and binding to a non-loopback address means anyone who can reach that port can execute arbitrary shell commands on your machine, read repository contents, and access session transcripts. Only do this on a trusted private network, and always use a VPN or [Tailscale](https://tailscale.com) for remote access.
+</Warning>
+
+## Protected agent commands
+
+`PROTECTED_AGENT_COMMANDS` is a comma-separated list of base command names that require manual approvals. The default is `codex,openai`. Any session whose command resolves to one of these base names (path prefixes and arguments are stripped) is classified as a `protected_agent` session.
+
+```bash
+# Keep the defaults but run the server
+npm run dev
+
+# Add a custom agent to the protected list
+PROTECTED_AGENT_COMMANDS=codex,openai,myagent npm run dev
+```
+
+Protected sessions show up distinctly in the agent grid and will not auto-respond to prompts. This is intentional: these agents tend to make consequential decisions (file writes, API calls, PRs), so keeping a human in the loop is important.
+
+## Disabling safe mode
+
+You can disable safe mode entirely by setting `OPENAI_SAFE_MODE=false`. The server will then:
+
+- Bind to `0.0.0.0` unless `HOST` is set explicitly
+- Apply no CORS restrictions unless `ALLOWED_ORIGINS` is set
+- Remove the `SAFE MODE ON` banner from the HUD
+
+```bash
+OPENAI_SAFE_MODE=false npm run dev
+```
+
+<Warning>
+Disabling safe mode is not recommended for most workflows. If you need remote access, use Tailscale or a VPN to tunnel to `127.0.0.1` rather than exposing the server directly. CC-GUI is designed for local use — the `/api/discover` endpoint lists git repos on your machine, and terminal scrollback may contain secrets.
+</Warning>
+
+## Remote access via Tailscale or VPN
+
+The recommended way to access CC-GUI remotely is to leave safe mode on and use a private network tunnel:
+
+<Steps>
+  <Step title="Install Tailscale (or your VPN of choice)">
+    See the [Tailscale quickstart](https://tailscale.com/kb/1017/install) for installation instructions. Your machine gets a stable private IP (e.g. `100.x.x.x`).
+  </Step>
+  <Step title="Keep CC-GUI bound to 127.0.0.1">
+    Run `npm run dev` with no HOST changes. Safe mode stays on.
+  </Step>
+  <Step title="Tunnel to localhost from your remote device">
+    Use `tailscale ssh` or set up a Tailscale funnel/serve rule to proxy `localhost:5173` from your remote device. Your session stays within the private network.
+  </Step>
+</Steps>
+
+## Related pages
+
+<CardGroup cols={2}>
+  <Card title="Environment variables" icon="sliders" href="/configuration/environment-variables">
+    Full reference for every variable that controls safe mode and server behavior.
+  </Card>
+  <Card title="Authentication" icon="lock" href="/configuration/authentication">
+    How the auth token protects all API routes and Socket.IO connections.
+  </Card>
+</CardGroup>

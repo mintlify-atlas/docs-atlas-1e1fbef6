@@ -1,0 +1,373 @@
+---
+title: "Orchestrator status API and Socket.IO events"
+description: "Reference for the orchestrator status endpoint, all 20 Socket.IO events, and the five priority levels CC-GUI uses to rank active sessions."
+---
+
+The CC-GUI orchestrator watches every session's terminal output in real time and assigns each one a priority level — from `CRITICAL` (permission prompt, needs your answer now) down to `NONE` (idle). This ranking drives the agent grid sort order and the activity sidebar. You can query the current state over HTTP or receive live updates over Socket.IO as soon as anything changes.
+
+## Priority levels
+
+The orchestrator uses five integer priority levels to classify session states. Higher numbers surface first in the ranked list.
+
+| Level | Value | Label | Triggered by |
+|-------|-------|-------|--------------|
+| `CRITICAL` | `4` | CRITICAL | Y/n confirmation prompt, "Do you want to proceed" dialog, permission approval request |
+| `HIGH` | `3` | HIGH | Bare `>` or `❯` input prompt, detected error or crash, non-zero exit code |
+| `MEDIUM` | `2` | MEDIUM | Task completed successfully (`✓`, `Done!`, `Successfully`, session exit code 0) |
+| `LOW` | `1` | LOW | Actively working (thinking, running a tool, responding, compacting context, API retry) |
+| `NONE` | `0` | IDLE | Nothing happening — session is idle |
+
+<Note>
+  When two sessions share the same priority, the one that reached that state earliest appears first in the ranked list. This means a CRITICAL session that has been waiting the longest gets the top slot.
+</Note>
+
+---
+
+## GET /api/orchestrator/status
+
+Returns the full current state of the AI orchestrator, including toggle flags, conflict data, PR statuses, and the active safe-mode configuration.
+
+```bash
+curl http://localhost:3456/api/orchestrator/status \
+  -H "Authorization: Bearer <token>"
+```
+
+**Response**
+
+```json
+{
+  "autoRespondEnabled": false,
+  "coordinationEnabled": true,
+  "conflicts": {
+    "proj-uuid-5678": {
+      "overlaps": [],
+      "mergeConflicts": []
+    }
+  },
+  "prStatus": {
+    "sess-uuid-1234": {
+      "state": "open",
+      "prUrl": "https://github.com/owner/repo/pull/42"
+    }
+  },
+  "safeModeConfig": {
+    "safeMode": true,
+    "host": "127.0.0.1",
+    "allowedOrigins": [
+      "http://127.0.0.1:5173",
+      "http://localhost:5173",
+      "http://127.0.0.1:3456",
+      "http://localhost:3456"
+    ],
+    "protectedAgentCommands": ["codex", "openai"],
+    "defaultSessionCommand": "claude"
+  }
+}
+```
+
+<ResponseField name="autoRespondEnabled" type="boolean" required>
+  Whether the orchestrator's auto-respond feature is currently active.
+</ResponseField>
+
+<ResponseField name="coordinationEnabled" type="boolean" required>
+  Whether cross-session coordination messages are enabled.
+</ResponseField>
+
+<ResponseField name="conflicts" type="object" required>
+  Conflict data keyed by project ID. Each value has `overlaps` (files touched by multiple sessions) and `mergeConflicts` (files with detected conflicts). See [projects API](/api/projects#get-apiprojectsidconflicts) for the per-entry shape.
+</ResponseField>
+
+<ResponseField name="prStatus" type="object" required>
+  PR creation status keyed by session ID. Each value has a `state` string and an optional `prUrl`.
+</ResponseField>
+
+<ResponseField name="safeModeConfig" type="object" required>
+  Active safe-mode configuration derived from environment variables at startup.
+
+  <Expandable title="safeModeConfig fields">
+    <ResponseField name="safeMode" type="boolean">Whether safe mode is enabled. Defaults to `true`.</ResponseField>
+    <ResponseField name="host" type="string">The host the server is bound to. `"127.0.0.1"` in safe mode.</ResponseField>
+    <ResponseField name="allowedOrigins" type="string[]">List of origins permitted by the CORS policy.</ResponseField>
+    <ResponseField name="protectedAgentCommands" type="string[]">Commands classified as `protected_agent` (defaults: `["codex", "openai"]`). Configurable via `PROTECTED_AGENT_COMMANDS`.</ResponseField>
+    <ResponseField name="defaultSessionCommand" type="string">The command used when no `command` is provided to `POST /api/sessions`. Configurable via `DEFAULT_SESSION_COMMAND`; defaults to `"claude"`.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+---
+
+## Socket.IO events
+
+Connect to `http://localhost:3456` with any Socket.IO v4 client. On connection, the server immediately emits the current state of every channel listed below so your client starts with a consistent snapshot.
+
+### Server → client events
+
+These events are emitted by the server and received by connected clients.
+
+#### `projects:updated`
+
+Emitted whenever any project is created or deleted.
+
+**Payload:** `Project[]` — the complete updated array of all projects. Shape matches `GET /api/projects`.
+
+#### `sessions:updated`
+
+Emitted whenever any session changes status, name, command, or other mutable fields.
+
+**Payload:** `Session[]` — the complete updated array of all sessions. Shape matches `GET /api/sessions`.
+
+#### `sessions:summaries`
+
+Emitted on connection and whenever summaries are refreshed. Contains extracted one-line summaries of recent terminal activity.
+
+**Payload:** `Record<string, string>` — session ID → summary string.
+
+#### `orchestrator:update`
+
+Emitted whenever session priorities change. The array is pre-sorted: highest priority first, then longest-waiting at equal priority.
+
+**Payload:** `OrchestratorEntry[]`
+
+<Expandable title="OrchestratorEntry fields">
+  <ResponseField name="sessionId" type="string">The session this entry describes.</ResponseField>
+  <ResponseField name="priority" type="number">Integer priority value (0–4). See priority table above.</ResponseField>
+  <ResponseField name="label" type="string">Human-readable label: `"CRITICAL"`, `"HIGH"`, `"MEDIUM"`, `"LOW"`, or `"IDLE"`.</ResponseField>
+  <ResponseField name="reason" type="string">Short description of why this priority was assigned (e.g. `"Confirmation needed"`, `"Running tool"`).</ResponseField>
+  <ResponseField name="action" type="string">Suggested action for the user (e.g. `"Respond Y or N"`, `"Review output"`).</ResponseField>
+  <ResponseField name="actionHint" type="string">Machine-readable hint for the UI (e.g. `"approve"`, `"review"`, `"working"`, `"idle"`).</ResponseField>
+  <ResponseField name="context" type="string">Up to 200 characters of recent terminal output that triggered this classification.</ResponseField>
+  <ResponseField name="detectedAt" type="number">Unix timestamp (ms) when this priority was first assigned.</ResponseField>
+  <ResponseField name="meta" type="object">Session metadata: `sessionName`, `projectName`, `projectId`.</ResponseField>
+</Expandable>
+
+#### `ai:summaries`
+
+AI-generated narrative summaries for each session.
+
+**Payload:** `Record<string, string>` — session ID → AI summary string.
+
+#### `ai:status`
+
+Emitted whenever auto-respond or coordination is toggled.
+
+**Payload:**
+
+<ParamField name="autoRespondEnabled" type="boolean">
+  Whether the orchestrator will automatically respond to agent prompts.
+</ParamField>
+
+<ParamField name="coordinationEnabled" type="boolean">
+  Whether cross-session coordination messages are being sent.
+</ParamField>
+
+#### `ai:diffs`
+
+Full diff details for all sessions, refreshed whenever the orchestrator recomputes diffs.
+
+**Payload:** `Record<string, DiffDetail>` — session ID → `{ files, rawDiff, summary }`. Shape matches `GET /api/sessions/:id/diff`.
+
+#### `ai:branches`
+
+Branch status for all sessions.
+
+**Payload:** `Record<string, BranchStatus>` — session ID → `{ commitCount, commits, base }`. Shape matches `GET /api/sessions/:id/branch`.
+
+#### `ai:conflicts`
+
+Conflict analysis results for all projects.
+
+**Payload:** `Record<string, ConflictResult>` — project ID → `{ overlaps, mergeConflicts }`. Shape matches `GET /api/projects/:id/conflicts`.
+
+#### `ai:pr-statuses`
+
+Current PR creation state for all sessions.
+
+**Payload:** `Record<string, PRStatus>` — session ID → `{ state, prUrl? }`.
+
+#### `terminal:data`
+
+Streams raw PTY output to every client subscribed to a session room. Only clients that have emitted `terminal:attach` for this session receive this event.
+
+**Payload:**
+
+<ParamField name="sessionId" type="string" required>
+  The session the data belongs to.
+</ParamField>
+
+<ParamField name="data" type="string" required>
+  A raw terminal output chunk. May contain ANSI escape sequences. Pass directly to an xterm.js instance.
+</ParamField>
+
+#### `terminal:exit`
+
+Fired when a session's process exits.
+
+**Payload:**
+
+<ParamField name="sessionId" type="string" required>
+  The session that exited.
+</ParamField>
+
+<ParamField name="code" type="number" required>
+  The process exit code. `0` indicates clean completion; any other value indicates an error.
+</ParamField>
+
+#### `terminal:restarted`
+
+Fired to all clients in a session room after `terminal:restart` completes. Clients should clear their terminal display on receipt.
+
+**Payload:**
+
+<ParamField name="sessionId" type="string" required>
+  The session that was restarted.
+</ParamField>
+
+#### `terminal:error`
+
+Fired when the terminal fails to spawn, write, or find a session.
+
+**Payload:**
+
+<ParamField name="sessionId" type="string" required>
+  The affected session ID.
+</ParamField>
+
+<ParamField name="error" type="string" required>
+  Human-readable error description.
+</ParamField>
+
+#### `terminal:attached`
+
+Confirms the client has successfully joined the session room and the PTY is ready (or scrollback has been replayed).
+
+**Payload:**
+
+<ParamField name="sessionId" type="string" required>
+  The session that was attached.
+</ParamField>
+
+#### `notification`
+
+Fired when a notable event occurs — currently only on task completion.
+
+**Payload:**
+
+<ParamField name="sessionId" type="string" required>
+  The session that triggered the notification.
+</ParamField>
+
+<ParamField name="type" type="string" required>
+  Notification type. Currently `"completed"`.
+</ParamField>
+
+<ParamField name="message" type="string" required>
+  Human-readable notification text (e.g. `"Aria finished the task!"`).
+</ParamField>
+
+<ParamField name="projectId" type="string" required>
+  The project the session belongs to.
+</ParamField>
+
+---
+
+### Client → server events
+
+These events are emitted by the client and handled by the server.
+
+#### `terminal:attach`
+
+Joins the client to a session's Socket.IO room. If no PTY is running for the session, one is spawned automatically using the session's `command`. If the session has already exited, scrollback is replayed and a `terminal:exit` event is emitted instead of spawning a new process.
+
+<ParamField name="sessionId" type="string" required>
+  The session to attach to.
+</ParamField>
+
+#### `terminal:detach`
+
+Leaves the session room. The PTY continues running; only this client stops receiving `terminal:data` events.
+
+<ParamField name="sessionId" type="string" required>
+  The session to detach from.
+</ParamField>
+
+#### `terminal:restart`
+
+Kills the existing PTY (if running), clears scrollback, resets the session status to `idle`, and notifies all clients in the room via `terminal:restarted`. The next `terminal:attach` will spawn a fresh process.
+
+<ParamField name="sessionId" type="string" required>
+  The session to restart.
+</ParamField>
+
+#### `terminal:input`
+
+Sends a string to the session's PTY stdin. Use this to type commands or respond to prompts.
+
+<ParamField name="sessionId" type="string" required>
+  The target session.
+</ParamField>
+
+<ParamField name="data" type="string" required>
+  The string to write to stdin. May be any character sequence including control characters (e.g. `"\r"` for Enter, `"\x03"` for Ctrl+C).
+</ParamField>
+
+#### `terminal:resize`
+
+Resizes the PTY. Call this whenever the terminal viewport changes to keep line-wrapping accurate.
+
+<ParamField name="sessionId" type="string" required>
+  The target session.
+</ParamField>
+
+<ParamField name="cols" type="number" required>
+  New column count. Must be a positive integer.
+</ParamField>
+
+<ParamField name="rows" type="number" required>
+  New row count. Must be a positive integer.
+</ParamField>
+
+#### `ai:toggle-auto-respond`
+
+Toggles the orchestrator's auto-respond feature on or off. No payload. The updated state is broadcast to all clients via `ai:status`.
+
+#### `ai:toggle-coordination`
+
+Toggles cross-session coordination messages on or off. No payload. The updated state is broadcast to all clients via `ai:status`.
+
+#### `ai:refresh`
+
+Forces the AI orchestrator to immediately recompute summaries, diffs, branch statuses, and conflicts for all active sessions. No payload.
+
+#### `ai:create-pr`
+
+Creates a GitHub PR for a single session. Equivalent to `POST /api/sessions/:id/create-pr`.
+
+<ParamField name="sessionId" type="string" required>
+  The session to create a PR for.
+</ParamField>
+
+#### `ai:create-all-prs`
+
+Creates GitHub PRs for every session in a project. Equivalent to `POST /api/projects/:id/create-prs`.
+
+<ParamField name="projectId" type="string" required>
+  The project whose sessions should all receive PRs.
+</ParamField>
+
+---
+
+## Related pages
+
+<CardGroup cols={2}>
+  <Card title="Projects API" icon="folder" href="/api/projects">
+    REST endpoints for creating projects and checking conflicts.
+  </Card>
+  <Card title="Sessions API" icon="rectangle-terminal" href="/api/sessions">
+    REST endpoints for managing sessions, diffs, branches, and PRs.
+  </Card>
+  <Card title="Architecture: orchestrator" icon="cpu" href="/architecture/orchestrator">
+    How the orchestrator analyses terminal output and assigns priority levels.
+  </Card>
+  <Card title="Safe mode" icon="shield" href="/configuration/safe-mode">
+    How safe mode restricts the server host and allowed origins.
+  </Card>
+</CardGroup>

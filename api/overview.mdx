@@ -1,0 +1,107 @@
+---
+title: "CC-GUI REST API and Socket.IO reference"
+description: "Complete reference for the CC-GUI local API: REST endpoints over HTTP and real-time events over Socket.IO, all bound to localhost."
+---
+
+CC-GUI exposes a local HTTP API at `http://localhost:3456` that the browser dashboard uses internally. You can call the same endpoints from scripts, CI pipelines, or any HTTP client — provided you supply the auth token. Alongside the REST layer, a Socket.IO connection gives you live push events for every state change: session status, terminal output, orchestrator updates, diff results, and more.
+
+<Note>
+  The API binds to `127.0.0.1` in safe mode (the default). It is accessible only from the machine running CC-GUI and is not intended to be exposed to the public internet. See [safe mode](/configuration/safe-mode) for details.
+</Note>
+
+## Base URL
+
+```
+http://localhost:3456
+```
+
+## Authentication
+
+Every `/api/*` route requires a Bearer token in the `Authorization` header.
+
+```bash
+curl http://localhost:3456/api/projects \
+  -H "Authorization: Bearer <token>"
+```
+
+The token is written to `~/.cc-gui/auth-token` on first launch. See [authentication](/configuration/authentication) for details.
+
+## REST endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/projects` | Returns an array of all projects. |
+| `POST` | `/api/projects` | Creates a new project with a name and file-system path. |
+| `DELETE` | `/api/projects/:id` | Deletes a project and kills all its sessions. |
+| `GET` | `/api/projects/:id/conflicts` | Returns file overlaps and merge conflicts across the project's sessions. |
+| `POST` | `/api/projects/:id/create-prs` | Creates GitHub PRs for every session in the project. |
+| `GET` | `/api/discover` | Discovers local git repos and GitHub repos (results cached 30 s). |
+| `GET` | `/api/sessions` | Returns an array of all sessions across all projects. |
+| `POST` | `/api/sessions` | Creates a new session under a project, optionally with a name and command. |
+| `DELETE` | `/api/sessions/:id` | Kills the PTY, removes the git worktree and branch, and deletes the session. |
+| `PATCH` | `/api/sessions/:id` | Updates the session `name` or `command` field. |
+| `GET` | `/api/sessions/:id/diff` | Returns the diff detail for a session: files changed, raw diff, and a summary. |
+| `GET` | `/api/sessions/:id/branch` | Returns commit count, commits, and the base branch for a session. |
+| `POST` | `/api/sessions/:id/create-pr` | Creates a GitHub PR for a single session. |
+| `POST` | `/api/sessions/:id/coordinate` | Sends a coordination message to a session's Claude agent. |
+| `GET` | `/api/orchestrator/status` | Returns full orchestrator status including auto-respond state and safe-mode config. |
+| `POST` | `/api/upload-image` | Saves a base64-encoded image to a temp file and returns the absolute path for use in terminal sessions. |
+
+## Socket.IO events
+
+Connect with any Socket.IO v4 client at `http://localhost:3456`.
+
+### Server → client (emitted by server)
+
+On connection, the server immediately emits the full current state across all channels below.
+
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `projects:updated` | `Project[]` | Fired whenever any project is created or deleted. |
+| `sessions:updated` | `Session[]` | Fired whenever any session changes status, name, or command. |
+| `sessions:summaries` | `Record<string, string>` | Extracted one-line summaries for each session, keyed by session ID. |
+| `orchestrator:update` | `OrchestratorEntry[]` | Sessions ranked by priority — highest first, then longest waiting. |
+| `ai:summaries` | `Record<string, string>` | AI-generated summaries for each session. |
+| `ai:status` | `{ autoRespondEnabled, coordinationEnabled }` | Current AI orchestrator toggle states. |
+| `ai:diffs` | `Record<string, DiffDetail>` | Diff details for all sessions, keyed by session ID. |
+| `ai:branches` | `Record<string, BranchStatus>` | Branch status for all sessions, keyed by session ID. |
+| `ai:conflicts` | `Record<string, ConflictResult>` | Conflict data for all projects, keyed by project ID. |
+| `ai:pr-statuses` | `Record<string, PRStatus>` | PR creation status for all sessions, keyed by session ID. |
+| `terminal:data` | `{ sessionId, data }` | Raw terminal output chunk from a session's PTY. |
+| `terminal:exit` | `{ sessionId, code }` | Fired when a session's process exits. |
+| `terminal:restarted` | `{ sessionId }` | Fired to all clients in a session room after a restart. |
+| `terminal:error` | `{ sessionId, error }` | Fired when the terminal fails to spawn or write. |
+| `terminal:attached` | `{ sessionId }` | Confirms the client has joined the session room. |
+| `notification` | `{ sessionId, type, message, projectId }` | Desktop-style notification (e.g. task completed). |
+
+### Client → server (listened by server)
+
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `terminal:attach` | `sessionId` | Joins a session room; spawns the PTY if not already running. |
+| `terminal:detach` | `sessionId` | Leaves the session room. |
+| `terminal:restart` | `sessionId` | Kills and clears a session's PTY, then resets it to `idle`. |
+| `terminal:input` | `{ sessionId, data }` | Sends a string to the session's PTY stdin. |
+| `terminal:resize` | `{ sessionId, cols, rows }` | Resizes the PTY. Both `cols` and `rows` must be positive integers. |
+| `ai:toggle-auto-respond` | _(none)_ | Toggles the orchestrator's auto-respond mode on or off. |
+| `ai:toggle-coordination` | _(none)_ | Toggles the orchestrator's coordination mode on or off. |
+| `ai:refresh` | _(none)_ | Forces the AI orchestrator to refresh all session data immediately. |
+| `ai:create-pr` | `{ sessionId }` | Creates a GitHub PR for the specified session. |
+| `ai:create-all-prs` | `{ projectId }` | Creates GitHub PRs for every session in the specified project. |
+
+## Explore further
+
+<CardGroup cols={2}>
+  <Card title="Projects API" icon="folder" href="/api/projects">
+    Detailed reference for all project endpoints with request parameters and response shapes.
+  </Card>
+  <Card title="Sessions API" icon="rectangle-terminal" href="/api/sessions">
+    Detailed reference for all session endpoints including diff, branch, and coordination.
+  </Card>
+  <Card title="Orchestrator API" icon="sliders" href="/api/orchestrator">
+    Orchestrator status endpoint, priority levels, and all Socket.IO event payloads.
+  </Card>
+  <Card title="Authentication" icon="lock" href="/configuration/authentication">
+    How to find your auth token and configure access to the local API.
+  </Card>
+</CardGroup>

@@ -1,0 +1,76 @@
+---
+title: "Using CC-GUI on Mobile and Touch Devices"
+description: "CC-GUI's terminal overlay and session carousel work on touch devices. Learn about the D-pad controls, swipe gestures, and mobile keyboard access."
+---
+
+CC-GUI runs in the browser and ships with first-class touch support. The terminal overlay detects touch capability at startup and activates a set of on-screen controls that expose the most-used keys without requiring a hardware keyboard. Swipe gestures let you move between sessions in the same project without closing the terminal.
+
+## D-pad controls
+
+On any touch-capable device, a retro D-pad appears in the bottom-left corner of the screen. The D-pad dispatches real `keydown` / `keyup` events into the app so the terminal and any focused input respond exactly as they would to physical key presses.
+
+| Button | Key sent |
+|--------|----------|
+| ▲ (up) | `ArrowUp` |
+| ▼ (down) | `ArrowDown` |
+| ◀ (left) | `ArrowLeft` |
+| ▶ (right) | `ArrowRight` |
+| **A** | `Enter` |
+
+The D-pad is rendered outside React's component tree (appended directly to `document.body`) so it stays visible and interactive regardless of which overlay is active.
+
+## Quick-action toolbar
+
+Inside the terminal overlay, a row of quick-action buttons sits below the terminal canvas. These send common escape sequences directly to the PTY:
+
+| Button | Sequence sent | Use |
+|--------|--------------|-----|
+| `↵` (Enter) | `\r` | Confirm a prompt |
+| `Tab` | `\t` | Autocomplete |
+| `↑` | `\x1b[A` | Scroll through shell history |
+| `↓` | `\x1b[B` | Scroll forward through shell history |
+
+## Mobile keyboard access
+
+Typing arbitrary text requires a software keyboard. Tap the **KB** button in the terminal header (only visible on touch devices) to focus a hidden `<textarea>` that summons the on-screen keyboard. Characters typed there are forwarded to the PTY as raw input. Special keys (`Enter`, `Backspace`, `Tab`, arrow keys) are intercepted and translated to their PTY escape sequences before being sent.
+
+<Tip>
+  If your software keyboard dismisses unexpectedly, tap **KB** again to re-focus the hidden input.
+</Tip>
+
+## Swipe to switch sessions
+
+When the terminal is open and the project has more than one session, you can swipe left or right on the **terminal header** to switch to the next or previous session without closing the overlay.
+
+- Swipe **left** on the header → advance to the next session
+- Swipe **right** on the header → go back to the previous session
+
+A swipe hint (`◀ swipe to switch ▶`) is shown at the bottom of the terminal whenever switching is possible. The threshold for a recognized swipe is **60 px** of horizontal travel.
+
+<Note>
+  Swiping on the terminal canvas itself scrolls the terminal output. Only swipes that start on the header bar trigger session switching.
+</Note>
+
+## Session carousel on touch
+
+Open the **GALLERY** view from the HUD to see all sessions in the active project as a scrollable list. On touch devices this list is natively scrollable. Tap any row to open that session's terminal. The `1`–`9` number shortcuts also work in this view, but the D-pad **A** button (Enter) does not submit number presses, so use the on-screen list for navigation.
+
+## GIT quick menu
+
+The **GIT** button in the terminal header opens a quick menu with pre-built git commands. Tapping any item sends the full command (including a trailing carriage return) to the PTY:
+
+| Menu item | Command sent |
+|-----------|-------------|
+| Status | `git status` |
+| Diff | `git diff --stat` |
+| Log | `git log --oneline -5` |
+| Create PR | `gh pr create --fill` |
+
+<CardGroup cols={2}>
+  <Card title="Concepts: Terminal" icon="terminal" href="/concepts/terminal">
+    Learn about the full-screen xterm.js terminal and how it attaches to the PTY.
+  </Card>
+  <Card title="Guides: Keyboard Shortcuts" icon="keyboard" href="/guides/keyboard-shortcuts">
+    See all global keyboard shortcuts, including those reachable from the D-pad.
+  </Card>
+</CardGroup>

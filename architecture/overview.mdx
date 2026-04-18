@@ -1,0 +1,92 @@
+---
+title: "CC-GUI Architecture: React Frontend and Express Backend"
+description: "A complete map of CC-GUI's architecture — React client, Express/Socket.IO server, node-pty PTY streams, and the orchestrator that ranks sessions."
+---
+
+CC-GUI is a two-process application: a React frontend served by Vite in development (or statically in production) and an Express + Socket.IO server that owns all terminal state. The two halves communicate exclusively over Socket.IO, with the server broadcasting priority rankings, session updates, and raw PTY output to every connected client in real time.
+
+## UI layout
+
+The dashboard is divided into three persistent regions. The HUD across the top hosts project tabs, safe-mode status, and stats. The agent grid fills the main area with one card per session for the active project, sorted by priority. The activity sidebar on the right aggregates alerts and a cross-project priority queue.
+
+```
+ ┌──────────────────────────────────────────────────────────────┐
+ │ HUD   CC GYM · SAFE MODE · stats · [project tabs]  [+ TABLE] │
+ ├────────────────────────────────────────┬─────────────────────┤
+ │                                        │                     │
+ │   AGENT GRID                           │   ACTIVITY SIDEBAR  │
+ │   (cards for the active project,       │   · Alerts          │
+ │    sorted by priority)                 │   · Queue           │
+ │                                        │     (all projects)  │
+ │                                        │                     │
+ └────────────────────────────────────────┴─────────────────────┘
+              click a card → full-screen terminal overlay
+```
+
+Clicking any agent card opens a full-screen terminal overlay backed by xterm.js. The overlay supports mobile swipe gestures and a session carousel for switching between sessions without returning to the grid.
+
+## Data flow
+
+The React client connects to the Express server over Socket.IO on startup. Authentication runs over the same connection using a shared bearer token. Once connected, the flow is as follows:
+
+1. The client receives `projects:updated` and `sessions:updated` events and renders the grid.
+2. When you open a terminal, the client emits `terminal:attach`. The server starts streaming PTY output into that session's Socket.IO room via `terminal:data` events.
+3. Keystrokes flow back as `terminal:input` events; the server writes them directly to the PTY.
+4. Every chunk of PTY output is also fed into the server-side `Orchestrator`, which strips ANSI codes, pattern-matches against Claude Code's prompt formats, and emits `orchestrator:update` with the new ranked queue.
+5. `StateDetector` watches both raw PTY bytes (spinners, OSC title changes, prompt characters) and Claude's JSON transcript files for granular state — `thinking`, `tool_running`, `responding`, `compacting`, `api_retry`. Those states feed back into the orchestrator to refine priority labels.
+
+## Server modules
+
+<CardGroup cols={2}>
+  <Card title="server/index.js" icon="server" href="/architecture/server">
+    Express + Socket.IO entrypoint. Wires auth, instantiates every module, registers routes and socket handlers, handles graceful shutdown.
+  </Card>
+  <Card title="server/routes.js" icon="route" href="/api/overview">
+    REST API handlers for projects, sessions, discovery, orchestrator status, and AI controls.
+  </Card>
+  <Card title="server/socket-handlers.js" icon="plug" href="/architecture/server">
+    Socket.IO event handlers for terminal attach/detach, input, resize, restart, and AI orchestrator controls.
+  </Card>
+  <Card title="server/store.js" icon="database" href="/architecture/server">
+    JSON file persistence at `data/store.json`. Atomic writes with a `.tmp` rename; auto-recovers from `.bak` on corruption.
+  </Card>
+  <Card title="server/terminal-manager.js" icon="terminal" href="/architecture/server">
+    `node-pty` wrapper. Spawns real PTY processes, streams output, persists scrollback to `data/scrollback/`, supports resize.
+  </Card>
+  <Card title="server/orchestrator.js" icon="list-ol" href="/architecture/orchestrator">
+    Ingests all terminal output, strips ANSI, pattern-matches Claude's prompt formats, and produces a ranked priority queue.
+  </Card>
+  <Card title="server/ai-orchestrator.js" icon="wand-magic-sparkles" href="/architecture/orchestrator">
+    Facade over AutoResponder, Summarizer, ConflictDetector, Coordinator, and PRCreator. Handles summaries, PR diffs, and auto-respond.
+  </Card>
+  <Card title="server/auth.js" icon="lock" href="/configuration/authentication">
+    Generates and loads the shared secret auth token stored at `~/.cc-gui/auth-token`. Provides Express and Socket.IO middleware.
+  </Card>
+</CardGroup>
+
+## Client modules
+
+<CardGroup cols={2}>
+  <Card title="src/App.jsx" icon="react" href="/concepts/agent-grid">
+    Root component. Owns top-level state, keyboard shortcut wiring, and layout composition.
+  </Card>
+  <Card title="src/hooks/useSocket.js" icon="arrow-right-arrow-left" href="/concepts/agent-grid">
+    Single React hook that manages the Socket.IO connection, all server event subscriptions, and every API call. The rest of the UI is purely declarative.
+  </Card>
+  <Card title="src/components/HUD.jsx" icon="bars" href="/concepts/agent-grid">
+    Top bar: project tabs, session stats, safe-mode banner, and keyboard shortcut hints.
+  </Card>
+  <Card title="src/components/AgentGrid.jsx" icon="grid" href="/concepts/agent-grid">
+    Main grid — one card per session, sorted by priority from the orchestrator queue.
+  </Card>
+  <Card title="src/components/ActivitySidebar.jsx" icon="sidebar" href="/concepts/activity-sidebar">
+    Right-side rail with dismissible alerts and the cross-project priority queue.
+  </Card>
+  <Card title="src/components/TerminalOverlay.jsx" icon="terminal" href="/concepts/terminal">
+    Full-screen xterm.js terminal emulator with mobile support and session carousel.
+  </Card>
+</CardGroup>
+
+<Note>
+  All server-to-client state updates are push-based over Socket.IO — the client never polls. REST endpoints handle reads (listing projects, sessions, diffs, branch status) and mutations (create/delete, PR creation, AI controls).
+</Note>

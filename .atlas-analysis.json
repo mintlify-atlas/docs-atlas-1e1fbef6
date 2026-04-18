@@ -1,0 +1,119 @@
+{
+  "projectType": "saas",
+  "projectName": "CC-GUI",
+  "projectDescription": "A retro-themed browser dashboard for managing multiple Claude Code CLI sessions in parallel across projects, with a live agent grid, activity sidebar, and full xterm.js terminal access.",
+  "theme": "almond",
+  "primaryColor": "#ce7152",
+  "lightColor": "#764e3f",
+  "darkColor": "#34342c",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/projects-and-sessions",
+              "concepts/agent-grid",
+              "concepts/activity-sidebar",
+              "concepts/terminal"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/safe-mode",
+              "configuration/environment-variables",
+              "configuration/authentication"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/keyboard-shortcuts",
+              "guides/mobile",
+              "guides/pr-workflow",
+              "guides/troubleshooting"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Reference",
+        "groups": [
+          {
+            "group": "API Reference",
+            "pages": [
+              "api/overview",
+              "api/projects",
+              "api/sessions",
+              "api/orchestrator"
+            ]
+          },
+          {
+            "group": "Architecture",
+            "pages": [
+              "architecture/overview",
+              "architecture/server",
+              "architecture/orchestrator"
+            ]
+          },
+          {
+            "group": "Contributing",
+            "pages": [
+              "contributing/development",
+              "contributing/testing"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Multi-session agent grid with real-time priority ranking (CRITICAL / HIGH / MEDIUM / LOW)",
+    "Full xterm.js terminal overlay with PTY streaming over Socket.IO",
+    "Activity sidebar with cross-project alerts and priority queue",
+    "Automatic project discovery from local git repos and GitHub account",
+    "Git worktree isolation — each session gets its own branch and working tree",
+    "AI orchestrator for session summaries, diff tracking, and PR creation",
+    "Safe mode: loopback-only binding, CORS restriction, and protected-agent approvals",
+    "Auto-respond and coordination features for hands-free session management",
+    "Mobile support with swipe gestures and touch controls"
+  ],
+  "publicApiSurface": [
+    "GET /api/projects",
+    "POST /api/projects",
+    "DELETE /api/projects/:id",
+    "GET /api/sessions",
+    "POST /api/sessions",
+    "DELETE /api/sessions/:id",
+    "PATCH /api/sessions/:id",
+    "GET /api/sessions/:id/diff",
+    "GET /api/sessions/:id/branch",
+    "POST /api/sessions/:id/create-pr",
+    "POST /api/sessions/:id/coordinate",
+    "GET /api/projects/:id/conflicts",
+    "POST /api/projects/:id/create-prs",
+    "GET /api/orchestrator/status",
+    "GET /api/discover",
+    "Socket.IO: terminal:attach",
+    "Socket.IO: terminal:detach",
+    "Socket.IO: terminal:input",
+    "Socket.IO: terminal:resize",
+    "Socket.IO: terminal:restart",
+    "Socket.IO: ai:toggle-auto-respond",
+    "Socket.IO: ai:toggle-coordination",
+    "Socket.IO: ai:create-pr",
+    "Socket.IO: ai:create-all-prs",
+    "Socket.IO: ai:refresh"
+  ]
+}

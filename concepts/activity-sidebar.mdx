@@ -1,0 +1,62 @@
+---
+title: "Activity Sidebar: Cross-Project Alerts and Priority Queue"
+description: "The activity sidebar is an always-visible right-side rail that aggregates alerts and a ranked priority queue across every open project in CC-GUI."
+---
+
+The activity sidebar lives on the right edge of the CC-GUI layout and is always visible — it never hides behind the terminal or a dialog. Its job is to give you a global view of everything happening across all your projects at once, so a CRITICAL session in a background project can never go unnoticed while you are focused elsewhere.
+
+## Alerts
+
+The top section of the sidebar shows **dismissible alerts**. Alerts are generated automatically for significant events:
+
+- **Error alerts** — a session exits with a non-zero code, hits a rate limit, or encounters a billing or authentication error.
+- **State-change alerts** — a session transitions to `completed` or `exited`.
+- **Conflict alerts** — the conflict detector identifies that two sessions in the same project have modified the same files or created merge conflicts.
+
+Click the dismiss button on any alert to remove it from the list. Alerts do not affect session state; they are purely informational.
+
+## Priority queue
+
+Below the alerts is the **Queue** — a flat, cross-project list of every tracked session ranked by priority. Sessions from all projects appear together, so the most urgent work always surfaces at the top regardless of which project tab you have selected.
+
+### Priority levels
+
+| Level | Name | Value | Meaning |
+|-------|------|-------|---------|
+| Highest | **CRITICAL** | 4 | Permission prompt or `(Y/n)` confirmation waiting |
+| | **HIGH** | 3 | Waiting for user input, error, or non-zero exit |
+| | **MEDIUM** | 2 | Task completed — ready for review |
+| | **LOW** | 1 | Actively working — no action needed |
+| Lowest | **IDLE** | 0 | No detectable activity |
+
+Each queue item shows:
+
+- A colour-coded priority dot (blinks at HIGH and CRITICAL).
+- The session's Pokémon name and the project it belongs to.
+- How long the session has been in its current state (e.g., `3m`, `1h`).
+- The orchestrator reason phrase (e.g., *"Confirmation needed"*, *"Task completed"*).
+- An AI-generated one-line summary of the session's current work.
+- A hint badge (e.g., **Y/N**, **ERROR**, **REVIEW**) showing the recommended next action.
+
+### Jumping to a session
+
+Click any queue item to open the terminal overlay for that session immediately. CC-GUI switches to the correct project automatically — you do not need to find and click the right project tab first.
+
+<Tip>
+  Press **1** through **9** to jump directly to the Nth session in the priority queue. Only sessions with MEDIUM priority or higher (value ≥ 2) are counted, so the number keys always map to sessions that actually need attention.
+</Tip>
+
+<Note>
+  The keyboard shortcuts **1**–**9** are disabled while a terminal is open, because keystrokes go to the PTY. Close the terminal first (`ESC`) to use them.
+</Note>
+
+## Explore next
+
+<CardGroup cols={2}>
+  <Card title="Agent Grid" icon="grid-2" href="/concepts/agent-grid">
+    See how sessions for the active project are displayed as priority-sorted cards.
+  </Card>
+  <Card title="Keyboard Shortcuts" icon="keyboard" href="/guides/keyboard-shortcuts">
+    Full reference for every keyboard shortcut available in CC-GUI.
+  </Card>
+</CardGroup>

@@ -1,0 +1,124 @@
+---
+title: "Creating and Managing Pull Requests for Sessions"
+description: "CC-GUI automates PR creation with git worktree isolation, one-click PR submission, bulk project PRs, live status tracking, and diff inspection per session."
+---
+
+Every session in a git-backed project gets its own isolated git worktree and branch. This means multiple Claude Code agents can work on the same repository simultaneously without stepping on each other's changes, and when a session is ready you can open a pull request with a single click. CC-GUI handles the rebase, push, PR title, and PR body generation automatically.
+
+<Note>
+  PR creation relies on the GitHub CLI. Run `gh auth login` before using any PR features. See [Authentication](/configuration/authentication) for details.
+</Note>
+
+## Git worktree isolation
+
+When a session is created on a git repository, the server immediately calls `git worktree add` to create a dedicated working tree under `~/.cc-gui/worktrees/<session-id>`. The session's branch follows the naming convention:
+
+```
+cc-gui/<starter>-<short-id>
+```
+
+For example, a session with starter `bulb` and ID `a1b2c3d4…` gets the branch `cc-gui/bulb-a1b2c3d4`. The worktree path and branch name are stored on the session object and surfaced in the agent card and terminal header.
+
+When a session is deleted, both the worktree directory and the branch are cleaned up automatically (`git worktree remove --force` followed by `git branch -D`).
+
+## Branch info in session cards
+
+Each card in the agent grid shows the current branch name below the session name. The terminal header also displays `<project> · <branch>` so you always know which branch the running Claude Code agent is operating on. The branch display updates in real time as the orchestrator polls git.
+
+## Creating a PR for a single session
+
+<Steps>
+  <Step title="Open the agent card">
+    Find the session in the agent grid. The card shows the current branch and any diff stats the orchestrator has collected.
+  </Step>
+  <Step title="Click Create PR">
+    Click the **Create PR** button on the card. The button is also available from inside the terminal overlay via the **GIT** quick menu (`gh pr create --fill`).
+  </Step>
+  <Step title="Wait for the pipeline">
+    CC-GUI runs a multi-step pipeline and updates the card status as it progresses:
+    1. **checking** — verifies there are no uncommitted changes
+    2. **rebasing** — rebases the session branch onto the latest base branch
+    3. **generating** — calls Claude to write the PR title and body from the diff
+    4. **pushing** — force-pushes the rebased branch to origin
+    5. **creating** — calls `gh pr create` with the generated title and body
+  </Step>
+  <Step title="Open the PR">
+    On success the card displays a **PR** link badge with the GitHub URL. Click it to open the pull request in your browser.
+  </Step>
+</Steps>
+
+<Warning>
+  The pipeline will fail at the **checking** step if the session has uncommitted changes. Commit or stash all changes inside the terminal before creating a PR.
+</Warning>
+
+## Creating PRs for all sessions at once
+
+To open PRs for every session in a project in a single action, use the **Create All PRs** button in the table context menu (open it from the GALLERY view via the `⋯` options button). You can also call the API directly:
+
+```bash
+curl -X POST http://localhost:3456/api/projects/<projectId>/create-prs \
+  -H "Authorization: Bearer <token>"
+```
+
+Sessions are processed sequentially, sorted by number of changed files (fewest first) to reduce the chance of rebase conflicts. The response includes per-session results:
+
+```json
+{
+  "success": true,
+  "results": [
+    { "sessionId": "abc123", "success": true, "url": "https://github.com/..." },
+    { "sessionId": "def456", "success": false, "error": "No commits on this branch" }
+  ]
+}
+```
+
+## PR status tracking
+
+The orchestrator broadcasts PR status updates over Socket.IO so the UI stays current without polling. Each session's PR status is one of:
+
+| Status | Meaning |
+|--------|---------|
+| `checking` | Verifying working tree is clean |
+| `rebasing` | Running `git rebase` |
+| `generating` | Calling Claude for PR content |
+| `pushing` | Running `git push` |
+| `creating` | Running `gh pr create` |
+| `created` | PR is live — `prUrl` is set |
+| `error` | Pipeline failed — `error` field explains why |
+
+You can also query the current status for all sessions via the orchestrator status endpoint:
+
+```bash
+GET /api/orchestrator/status
+```
+
+The response includes a `prStatus` map keyed by session ID.
+
+## Inspecting diffs
+
+CC-GUI tracks per-session git diffs continuously in the background. To see which files a session has changed and get the raw diff:
+
+```bash
+GET /api/sessions/:id/diff
+```
+
+Example response:
+
+```json
+{
+  "files": ["src/App.jsx", "server/routes.js"],
+  "rawDiff": "diff --git a/src/App.jsx ...",
+  "summary": "2 files changed, 47 insertions(+), 3 deletions(-)"
+}
+```
+
+This endpoint returns `{ files: [], rawDiff: '', summary: 'No data yet' }` if the orchestrator has not yet polled git for this session.
+
+<CardGroup cols={2}>
+  <Card title="Concepts: Projects and Sessions" href="/concepts/projects-and-sessions">
+    Understand how projects map to directories and how sessions are isolated.
+  </Card>
+  <Card title="API: Sessions" href="/api/sessions">
+    Full reference for the sessions REST API including the diff and branch endpoints.
+  </Card>
+</CardGroup>

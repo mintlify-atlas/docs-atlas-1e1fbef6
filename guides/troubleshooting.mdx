@@ -1,0 +1,159 @@
+---
+title: "Troubleshooting Common CC-GUI Issues and Errors"
+description: "Step-by-step fixes for the most common CC-GUI issues: node-pty build failures, missing claude binary, blank screen on load, GitHub auth, and stuck sessions."
+---
+
+Most CC-GUI issues fall into a small number of categories: a missing native toolchain, a `claude` binary that isn't on the server's PATH, both processes not running at the same time, or a missing GitHub CLI authentication. The items below cover every issue reported so far, with exact commands to resolve each one.
+
+<AccordionGroup>
+  <Accordion title="npm install fails on node-pty">
+    `node-pty` compiles a native C++ add-on. If your system is missing a C/C++ compiler the install will fail with an error like `gyp ERR! build error` or `make: command not found`.
+
+    **macOS**
+
+    ```bash
+    xcode-select --install
+    ```
+
+    Accept the prompt that appears, wait for the command-line tools to install, then re-run `npm install`.
+
+    **Ubuntu / Debian Linux**
+
+    ```bash
+    sudo apt install build-essential python3
+    ```
+
+    **Other Linux distributions** — install the equivalent packages for your distro (gcc, g++, make, python3). After installing the toolchain, run `npm install` again from the repository root.
+  </Accordion>
+
+  <Accordion title="'claude' command not found when opening a session">
+    The server extends `PATH` with `~/.local/bin` before spawning session processes, which covers the default Claude Code CLI install location. If your `claude` binary lives somewhere else, the session will fail to start with a "command not found" error.
+
+    <Steps>
+      <Step title="Find the binary">
+        ```bash
+        which claude
+        ```
+        Note the full path, for example `/opt/homebrew/bin/claude`.
+      </Step>
+      <Step title="Option A — symlink it into ~/.local/bin">
+        ```bash
+        mkdir -p ~/.local/bin
+        ln -s /opt/homebrew/bin/claude ~/.local/bin/claude
+        ```
+      </Step>
+      <Step title="Option B — use the full path as the session command">
+        When spawning a session, set the **Command** field to the full path instead of `claude`. You can also set `DEFAULT_SESSION_COMMAND` in your environment before starting the server:
+        ```bash
+        DEFAULT_SESSION_COMMAND=/opt/homebrew/bin/claude npm run dev
+        ```
+      </Step>
+    </Steps>
+  </Accordion>
+
+  <Accordion title="Blank screen on load">
+    CC-GUI requires two processes to be running simultaneously:
+
+    - **API server** on `http://localhost:3456` (Express + Socket.IO)
+    - **Vite dev server** on `http://localhost:5173` (React frontend)
+
+    `npm run dev` starts both with `concurrently`. If you see a blank screen, check the terminal output for errors from either process.
+
+    <Steps>
+      <Step title="Confirm both are running">
+        ```bash
+        npm run dev
+        ```
+        You should see log lines from both the server (`[server]`) and Vite (`[vite]`). If one exited immediately, the error will be in that output.
+      </Step>
+      <Step title="Check for port conflicts">
+        If port 3456 or 5173 is already in use, the process that couldn't bind will exit silently. Free the ports and restart:
+        ```bash
+        lsof -ti:3456 | xargs kill -9
+        lsof -ti:5173 | xargs kill -9
+        npm run dev
+        ```
+      </Step>
+      <Step title="Open the correct URL">
+        Open **http://localhost:5173** in your browser, not `:3456`. In production (`npm start`) both are served from `:3456`.
+      </Step>
+    </Steps>
+  </Accordion>
+
+  <Accordion title="GitHub repos not showing in project picker">
+    The **GITHUB** tab in the project picker calls `gh repo list` to fetch your repositories. If the GitHub CLI is not installed or not authenticated, the tab will be empty or missing.
+
+    <Steps>
+      <Step title="Install the GitHub CLI">
+        Follow the instructions at [cli.github.com](https://cli.github.com) for your platform.
+      </Step>
+      <Step title="Authenticate">
+        ```bash
+        gh auth login
+        ```
+        Follow the prompts to authenticate via browser or token.
+      </Step>
+      <Step title="Verify">
+        ```bash
+        gh auth status
+        ```
+        The output should say `Logged in to github.com`.
+      </Step>
+    </Steps>
+
+    Local git repos are discovered separately by scanning your home directory and do not require GitHub CLI authentication.
+  </Accordion>
+
+  <Accordion title="Server refuses to start with a non-local HOST">
+    <Warning>
+      Setting `ALLOW_UNSAFE_REMOTE=true` exposes CC-GUI to the network. Anyone who can reach the server can execute arbitrary commands on your machine. Only do this on a trusted private network, behind a VPN or firewall.
+    </Warning>
+
+    CC-GUI's safe mode binds to `127.0.0.1` by default. If you set `HOST` to a non-loopback address without also setting `ALLOW_UNSAFE_REMOTE=true`, the server will refuse to start with an error like:
+
+    ```
+    [safe-mode] Refusing to bind to non-local HOST without ALLOW_UNSAFE_REMOTE=true
+    ```
+
+    To allow remote access when you understand the implications:
+
+    ```bash
+    ALLOW_UNSAFE_REMOTE=true HOST=0.0.0.0 npm run dev
+    ```
+
+    For safer remote access, leave `HOST` at `127.0.0.1` and use [Tailscale](https://tailscale.com) or a VPN to reach the machine, then access CC-GUI via `localhost` over the tunnel.
+
+    See [Safe Mode](/configuration/safe-mode) for the full list of protections safe mode provides.
+  </Accordion>
+
+  <Accordion title="Session stuck or not responding">
+    If a session's Claude Code process has hung, frozen, or exited without the UI noticing, you can restart the underlying PTY without losing the session's branch or git history.
+
+    <Steps>
+      <Step title="Open the terminal">
+        Click the session's card in the agent grid to open the terminal overlay.
+      </Step>
+      <Step title="Click the restart button">
+        Click the **↻** (restart) button in the top-right corner of the terminal header. This kills and re-spawns the PTY process while keeping the session's configuration (command, working directory, branch) intact.
+      </Step>
+    </Steps>
+
+    If the UI itself is unresponsive, you can trigger a restart via the API:
+
+    ```bash
+    # Socket.IO event — emit via your client
+    socket.emit('terminal:restart', { sessionId: '<id>' })
+    ```
+
+    The session will re-attach automatically when the new PTY is ready.
+  </Accordion>
+</AccordionGroup>
+
+<CardGroup cols={2}>
+  <Card title="Configuration: Safe Mode" href="/configuration/safe-mode">
+    Full reference for safe mode settings and the ALLOW_UNSAFE_REMOTE flag.
+  </Card>
+  <Card title="Configuration: Environment Variables" href="/configuration/environment-variables">
+    All environment variables CC-GUI reads at startup, including HOST and DEFAULT_SESSION_COMMAND.
+  </Card>
+</CardGroup>

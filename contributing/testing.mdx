@@ -1,0 +1,127 @@
+---
+title: "Testing CC-GUI: vitest, Test Structure, and Seed Data"
+description: "How to run CC-GUI's vitest test suite, where tests live, what to cover when contributing, and how to seed sample data for manual testing."
+---
+
+CC-GUI uses [vitest](https://vitest.dev) for unit testing. Tests focus on the server-side logic that is hardest to verify manually: the orchestrator's priority detection, the state detector's signal fusion, and the auto-responder's decision logic. If you are fixing a bug or adding behavior in any of these modules, a matching test is expected.
+
+## Running tests
+
+```bash
+# Run the full suite once
+npm test
+
+# Run in watch mode — re-runs on every file save
+npm run test:watch
+```
+
+`vitest` is configured in `vitest.config.js` to include only files matching `server/__tests__/**/*.test.js`:
+
+```js
+// vitest.config.js
+import { defineConfig } from 'vitest/config';
+
+export default defineConfig({
+  test: {
+    include: ['server/__tests__/**/*.test.js'],
+  },
+});
+```
+
+All tests must pass before a pull request can be merged. Run `npm test` as the final step in your development workflow.
+
+## Test file locations
+
+Tests live in `server/__tests__/`. The current suite covers:
+
+| File | What it tests |
+|---|---|
+| `orchestrator.test.js` *(via auto-responder coverage)* | Priority detection cascade, buffer trimming, debounce behavior |
+| `auto-responder.test.js` | Auto-respond trigger conditions and safe-mode blocks |
+| `state-detector.test.js` | PTY spinner / OSC / prompt detection and transcript fusion |
+| `transcript-watcher.test.js` | JSON transcript parsing and state event emission |
+| `ai-orchestrator-safe-mode.test.js` | Protected-agent block reasons and safe-mode config propagation |
+
+## What to test
+
+<Steps>
+  <Step title="Bug fixes">
+    Reproduce the bug in a test first — write a failing test that demonstrates the incorrect behavior, then fix the code until the test passes. This prevents regressions.
+  </Step>
+  <Step title="New orchestrator patterns">
+    If you add a new priority detection pattern to `_analyze()`, add a test case in the orchestrator test file with the exact terminal output that should trigger it and assert on `priority`, `label`, and `reason`.
+
+    ```js
+    // Example: test a new CRITICAL pattern
+    import { Orchestrator, PRIORITY } from '../orchestrator.js';
+
+    test('detects custom approval prompt as CRITICAL', () => {
+      const orch = new Orchestrator();
+      orch.ingest('s1', 'Confirm action? (Y/n) ', {});
+      const state = orch.getState('s1');
+      expect(state.priority).toBe(PRIORITY.CRITICAL);
+    });
+    ```
+  </Step>
+  <Step title="New StateDetector signals">
+    Add test cases that feed raw PTY bytes through `StateDetector.ingest()` and assert on `getGranularState()`. Use the existing `state-detector.test.js` as a reference for how to set up the mock transcript watcher.
+  </Step>
+  <Step title="Auto-responder changes">
+    The auto-responder has its own test file. Cover both the happy path (trigger fires) and the block paths (safe mode, protected-agent command).
+  </Step>
+</Steps>
+
+## Seeding test data
+
+The seed script populates `data/store.json` with sample projects and sessions so you can test the UI without setting up real Claude projects:
+
+```bash
+node scripts/seed.js
+```
+
+<Note>
+  The seed script overwrites `data/store.json`. Re-run `cp data/store.example.json data/store.json` if you want to reset to the minimal example state instead.
+</Note>
+
+After seeding, restart the dev server (`npm run dev`) and open `http://localhost:5173`. You will see sample projects and sessions pre-populated in the agent grid and sidebar.
+
+## Test writing conventions
+
+- Use plain `vitest` globals (`test`, `expect`, `beforeEach`) — no extra test library is needed.
+- Keep each test focused on one behavior. Prefer many small tests over few large ones.
+- Name tests descriptively: `test('getRanked sorts CRITICAL before HIGH', ...)`.
+- Avoid mocking the filesystem unless testing persistence behavior directly — instantiate real class instances with in-memory options where the class supports it.
+- Clean up any timers or intervals in `afterEach` to prevent test pollution from debounce timers in the orchestrator or state detector.
+
+```js
+import { afterEach, beforeEach, expect, test } from 'vitest';
+import { Orchestrator, PRIORITY } from '../orchestrator.js';
+
+let orch;
+
+beforeEach(() => {
+  orch = new Orchestrator();
+});
+
+afterEach(() => {
+  // Clear any pending debounce timers
+  if (orch._debounceTimer) clearTimeout(orch._debounceTimer);
+});
+
+test('getRanked returns CRITICAL before HIGH', () => {
+  orch.ingest('s1', 'Working on task\n> ', {});        // HIGH
+  orch.ingest('s2', 'Continue? (Y/n) ', {});            // CRITICAL
+  const ranked = orch.getRanked();
+  expect(ranked[0].priority).toBe(PRIORITY.CRITICAL);
+  expect(ranked[1].priority).toBe(PRIORITY.HIGH);
+});
+```
+
+<CardGroup cols={2}>
+  <Card title="Development setup" icon="code" href="/contributing/development">
+    Clone, install, and run the dev server before writing tests.
+  </Card>
+  <Card title="Orchestrator internals" icon="list-ol" href="/architecture/orchestrator">
+    Understand what the orchestrator does before testing it.
+  </Card>
+</CardGroup>

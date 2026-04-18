@@ -1,0 +1,126 @@
+---
+title: "Environment variables for safe mode, binding, and sessions"
+description: "Reference for every environment variable CC-GUI reads at startup to configure safe mode, server binding, CORS origins, and default session behavior."
+---
+
+CC-GUI reads a small set of environment variables at startup through the `buildSafeModeConfig` function in `server/utils.js`. These variables control whether safe mode is active, which network interface the server binds to, which origins are allowed by CORS, and what command new sessions run by default. All variables are optional — the defaults are chosen for safe local use.
+
+## Variable reference
+
+| Variable | Default | Description |
+|---|---|---|
+| `OPENAI_SAFE_MODE` | `true` | Enables safe mode. Accepts `true`, `1`, `yes`, or `on` (case-insensitive). |
+| `HOST` | `127.0.0.1` (safe mode) / `0.0.0.0` (unsafe) | Network interface the server binds to. |
+| `ALLOW_UNSAFE_REMOTE` | `false` | Allows a non-local `HOST` while safe mode is on. |
+| `ALLOWED_ORIGINS` | Local origins (safe mode) / none (unsafe) | Comma-separated list of allowed CORS origins. |
+| `PROTECTED_AGENT_COMMANDS` | `codex,openai` | Commands whose sessions require manual approvals. |
+| `DEFAULT_SESSION_COMMAND` | `claude` | Command run when spawning a new session without a custom command. |
+
+---
+
+### `OPENAI_SAFE_MODE`
+
+Controls whether safe mode is active. Defaults to `true`.
+
+When `true`, the server enforces loopback-only binding, restricts CORS to explicit local origins, and requires manual approvals for protected agent sessions. Setting this to `false` removes all of those restrictions.
+
+```bash
+# Explicitly enable (same as the default)
+OPENAI_SAFE_MODE=true npm run dev
+
+# Disable safe mode
+OPENAI_SAFE_MODE=false npm run dev
+```
+
+---
+
+### `HOST`
+
+The network interface the server listens on. Defaults to `127.0.0.1` when safe mode is on, or `0.0.0.0` when safe mode is off.
+
+In safe mode, setting `HOST` to any address other than `127.0.0.1` will cause startup to fail unless `ALLOW_UNSAFE_REMOTE=true` is also set.
+
+```bash
+# Bind to all interfaces (requires ALLOW_UNSAFE_REMOTE=true if safe mode is on)
+HOST=0.0.0.0 ALLOW_UNSAFE_REMOTE=true npm run dev
+```
+
+---
+
+### `ALLOW_UNSAFE_REMOTE`
+
+Allows the server to bind to a non-local `HOST` while `OPENAI_SAFE_MODE=true`. Defaults to `false`.
+
+This is a deliberate two-step: safe mode will not silently allow remote binding. You must set both `HOST` and `ALLOW_UNSAFE_REMOTE=true` to expose the server on a network interface.
+
+```bash
+OPENAI_SAFE_MODE=true HOST=0.0.0.0 ALLOW_UNSAFE_REMOTE=true npm run dev
+```
+
+---
+
+### `ALLOWED_ORIGINS`
+
+A comma-separated list of origins permitted by CORS. When unset and safe mode is on, defaults to the four local origins below. When unset and safe mode is off, no CORS restriction is applied.
+
+Default safe-mode origins:
+- `http://127.0.0.1:5173`
+- `http://localhost:5173`
+- `http://127.0.0.1:3456`
+- `http://localhost:3456`
+
+Setting `ALLOWED_ORIGINS=*` while safe mode is on will cause startup to fail — wildcards are explicitly rejected.
+
+```bash
+# Allow an additional custom origin
+ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,http://mydevbox:5173 npm run dev
+```
+
+---
+
+### `PROTECTED_AGENT_COMMANDS`
+
+A comma-separated list of command names whose sessions are classified as `protected_agent`. Defaults to `codex,openai`.
+
+Path prefixes and arguments are stripped before comparison, so `/usr/local/bin/codex --flag` still matches `codex`. Sessions in this class are shown distinctly in the agent grid and require manual approvals for confirmation prompts.
+
+```bash
+# Add a third agent to the protected list
+PROTECTED_AGENT_COMMANDS=codex,openai,myagent npm run dev
+```
+
+---
+
+### `DEFAULT_SESSION_COMMAND`
+
+The command run when you spawn a new session without specifying a custom command. Defaults to `claude`. You can override the command per session in the new-session dialog.
+
+```bash
+# Run Codex by default instead of Claude
+DEFAULT_SESSION_COMMAND=codex npm run dev
+```
+
+<Note>
+`DEFAULT_SESSION_COMMAND` only affects the pre-filled default in the session dialog. You can always type a different command — `bash`, `npm run dev`, a full path — when creating any individual session.
+</Note>
+
+## Full example
+
+```bash
+# Safe mode on, Codex as default, extra CORS origin
+OPENAI_SAFE_MODE=true \
+DEFAULT_SESSION_COMMAND=codex \
+ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173 \
+npm run dev
+```
+
+## Related pages
+
+<CardGroup cols={2}>
+  <Card title="Safe mode" icon="shield" href="/configuration/safe-mode">
+    How safe mode works and when to enable ALLOW_UNSAFE_REMOTE.
+  </Card>
+  <Card title="Authentication" icon="lock" href="/configuration/authentication">
+    How the auth token is generated and used by the frontend.
+  </Card>
+</CardGroup>

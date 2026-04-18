@@ -1,0 +1,154 @@
+---
+title: "Orchestrator: Session Priority Detection and Ranking"
+description: "How CC-GUI's Orchestrator ingests PTY output, pattern-matches Claude's prompt states, and produces a ranked priority queue driving the agent grid."
+---
+
+The `Orchestrator` class in `server/orchestrator.js` is the brain of the agent grid. It receives every byte of terminal output from every running session, strips ANSI escape codes, and uses a layered pattern-matching strategy to decide which sessions need your attention most urgently. The resulting ranked list drives the grid order, card accent colors, and the sidebar priority queue.
+
+## Priority levels
+
+```js
+export const PRIORITY = {
+  CRITICAL: 4,  // Permission prompts, Y/n confirmations
+  HIGH:     3,  // Waiting for user input, errors
+  MEDIUM:   2,  // Task completed, needs review
+  LOW:      1,  // Actively working
+  NONE:     0,  // Idle / nothing happening
+};
+```
+
+| Level | Label | Typical trigger |
+|---|---|---|
+| 4 | CRITICAL | `(Y/n)` or `(y/N)` confirmation prompt; `Do you want to proceed` / `Allow … to` |
+| 3 | HIGH | Bare `>` or `❯` prompt at end of output; `Error`, `Failed`, `ENOENT`, `Permission denied`; session exited non-zero; transcript error states |
+| 2 | MEDIUM | `✓`, `Done.`, `Successfully`, `Completed`, `finished` on last two lines; session status changed to `completed` |
+| 1 | LOW | Active work indicators from `StateDetector` (`thinking`, `tool_running`, `responding`, `compacting`, `api_retry`) or keyword fallback |
+| 0 | IDLE | None of the above |
+
+## ingest()
+
+`ingest(sessionId, rawData, meta)` is called on every chunk of PTY output by the socket handler. It:
+
+1. Appends `rawData` to the session's ring buffer, trimming to `ORCHESTRATOR_BUFFER_LIMIT` (8 000 bytes) from the tail.
+2. Strips ANSI codes from the full buffer with `stripAnsi()` and takes the last 600 characters as `tail`.
+3. Calls `_analyze(sessionId, tail, meta)` to get the new priority/reason.
+4. Preserves the original `detectedAt` timestamp if the priority and reason are unchanged (so the "longest waiting first" sort is stable).
+5. Stores the result and arms a 50 ms debounce timer before calling `onChange()`.
+
+```js
+ingest(sessionId, rawData, meta) {
+  let buf = (this.buffers.get(sessionId) || '') + rawData;
+  if (buf.length > ORCHESTRATOR_BUFFER_LIMIT) buf = buf.slice(-ORCHESTRATOR_BUFFER_LIMIT);
+  this.buffers.set(sessionId, buf);
+
+  const clean = stripAnsi(buf);
+  const tail = clean.slice(-600);
+
+  const prev = this.states.get(sessionId);
+  const analysis = this._analyze(sessionId, tail, meta);
+
+  if (prev && prev.priority === analysis.priority && prev.reason === analysis.reason) {
+    analysis.detectedAt = prev.detectedAt;
+  } else {
+    analysis.detectedAt = Date.now();
+  }
+
+  this.states.set(sessionId, { ...analysis, sessionId, meta });
+
+  if (this.onChange) {
+    clearTimeout(this._debounceTimer);
+    this._debounceTimer = setTimeout(() => this.onChange(), 50);
+  }
+}
+```
+
+The 50 ms debounce batches the burst of chunks that arrive together at high throughput (a single Claude response can produce hundreds of small PTY writes per second) and keeps the `orchestrator:update` Socket.IO event rate manageable.
+
+## _analyze()
+
+`_analyze(sessionId, tail, meta)` works through a fixed priority cascade, returning as soon as a condition matches. The checks run from highest to lowest priority:
+
+<Steps>
+  <Step title="CRITICAL — confirmation prompts">
+    Regex tests the full tail for `(Y/n)` or `(y/N)` at end-of-string. A second check looks for `Do you want to proceed`, `Allow ... to`, `Approve`/`Deny`, or `Would you like to` in the last two lines.
+  </Step>
+  <Step title="HIGH — waiting for input">
+    Tests whether the very last non-empty line is a bare `>` or `❯` prompt character. This is Claude's input prompt after it has finished a turn.
+  </Step>
+  <Step title="HIGH — error detected">
+    Only checked when the last two lines do **not** match active-work keywords (`Thinking`, `Working`, `Running`, etc.). Matches `Error`, `Failed`, `ENOENT`, `EACCES`, `Permission denied`, `Command failed`, `panic`, `FATAL`.
+  </Step>
+  <Step title="MEDIUM — task completed">
+    Again gated by the absence of active-work keywords. Matches `✓`, `✔`, `Done.`, `Done!`, `Successfully`, `Completed`, `finished` in the last two lines.
+  </Step>
+  <Step title="LOW — actively working (StateDetector path)">
+    Defers to `StateDetector.getGranularState()` for the session. If the granular state is `thinking`, `tool_running`, `responding`, `compacting`, `api_retry`, or `working`, returns LOW. If the granular state is `error`, maps the transcript error type to a HIGH entry with a human-readable reason (`Rate limited`, `Billing error`, `Auth failed`, etc.).
+  </Step>
+  <Step title="LOW — actively working (fallback keyword path)">
+    When no `StateDetector` is injected, falls back to keyword scanning the last 300 characters for `Thinking`, `Working`, `Running`, `Reading`, `Writing`, `Editing`, `Searching`, `Analyzing`, `Creating`, `Updating`, `Compiling`, `Building`, `Installing`.
+  </Step>
+  <Step title="NONE — idle">
+    None of the above matched. The session is doing nothing.
+  </Step>
+</Steps>
+
+## getRanked()
+
+`getRanked()` returns all tracked sessions as an array sorted first by priority descending (CRITICAL first), then by `detectedAt` ascending (longest-waiting session at that priority level comes first).
+
+```js
+getRanked() {
+  const entries = [];
+  for (const [sessionId, state] of this.states) {
+    entries.push({ ...state });
+  }
+  entries.sort((a, b) => {
+    if (b.priority !== a.priority) return b.priority - a.priority;
+    return (a.detectedAt || 0) - (b.detectedAt || 0);
+  });
+  return entries;
+}
+```
+
+This array is emitted as the `orchestrator:update` Socket.IO event whenever `onChange` fires. The React client stores it as `orchestratorQueue` and uses it to sort `AgentGrid` cards and populate the `ActivitySidebar` queue.
+
+## StateDetector integration
+
+The `Orchestrator` is constructed with an optional `stateDetector` reference:
+
+```js
+const orchestrator = new Orchestrator({ stateDetector });
+```
+
+`StateDetector` fuses two signals:
+
+- **PTY signal** — raw bytes analyzed for spinner characters (`·✢✳✶✻✽●`), OSC window-title sequences (Claude Code sets animated prefixes `⠂`/`⠐` while busy and `✳` when idle), and prompt characters at end-of-output.
+- **Transcript signal** — JSON events from Claude's `~/.claude/projects/` transcript file, watched by `TranscriptWatcher`. These carry granular states (`thinking`, `tool_running`, `responding`, `compacting`, `api_retry`) and detail objects (tool name, error type, retry count).
+
+The transcript is authoritative, but PTY detection fills the gap when the transcript lags. For example:
+
+- PTY prompt detection (`>` at end) overrides a stale transcript `waiting` state immediately.
+- PTY spinner detection overrides a stale `waiting` after the user sends input, before the transcript has emitted the next `thinking` event.
+
+```js
+// StateDetector granular states visible to the Orchestrator
+['thinking', 'tool_running', 'responding', 'compacting', 'api_retry', 'working']
+```
+
+## Buffer and debounce constants
+
+| Constant | Value | Purpose |
+|---|---|---|
+| `ORCHESTRATOR_BUFFER_LIMIT` | 8 000 bytes | Max raw bytes kept per session before tail-trimming |
+| Debounce | 50 ms | Batches rapid `onChange` calls from high-throughput PTY output |
+| Analysis tail | 600 chars | ANSI-stripped characters analyzed for pattern matching |
+| Last-lines slice | 8 lines | Lines used for context extraction and two-line guards |
+
+<CardGroup cols={2}>
+  <Card title="Architecture overview" icon="sitemap" href="/architecture/overview">
+    See where the orchestrator fits in the full data flow.
+  </Card>
+  <Card title="Orchestrator API" icon="code" href="/api/orchestrator">
+    REST and Socket.IO endpoints that expose the orchestrator queue.
+  </Card>
+</CardGroup>

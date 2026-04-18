@@ -1,0 +1,72 @@
+---
+title: "Terminal Overlay: Full PTY Access to Any Live Session"
+description: "The terminal overlay is a full-screen xterm.js terminal attached to a session's real PTY over Socket.IO, with mobile touch support and one-tap restart."
+---
+
+The terminal overlay is where you interact directly with a running session. It is a full-screen xterm.js terminal window — not a log viewer or a read-only replay, but a live bidirectional connection to the session's PTY. Everything you can do in a local terminal works here: type prompts, approve tool use, run git commands, send signals, resize the viewport.
+
+## Opening a terminal
+
+<Steps>
+  <Step title="Find the session card">
+    Locate the session in the agent grid or the activity sidebar queue. CRITICAL and HIGH sessions are sorted to the top of both views.
+  </Step>
+  <Step title="Click the card">
+    Click anywhere on the session card in the agent grid, or click any queue item in the activity sidebar. The terminal overlay slides in full-screen immediately.
+  </Step>
+  <Step title="Interact">
+    The terminal is live. Type your response, approve a tool, or just watch the output scroll. The cursor is active from the moment the overlay opens.
+  </Step>
+</Steps>
+
+## PTY streaming over Socket.IO
+
+The server spawns each session via `node-pty` and streams raw PTY output into a dedicated Socket.IO room for that session. When you open the terminal overlay, the React client joins that room and xterm.js renders the incoming byte stream — including all ANSI colour codes and cursor control sequences — exactly as a native terminal emulator would.
+
+Input you type is sent back over the same Socket.IO connection to the server, which writes it to the PTY's stdin. Resize events are also forwarded so the PTY dimensions stay in sync with your browser window.
+
+## Switching between sessions
+
+When a project has more than one session, the terminal overlay shows a carousel so you can move between them without closing and reopening.
+
+- **Mobile / touch**: swipe left or right on the terminal header to move to the next or previous session in the project.
+- **Desktop**: arrow indicators appear in the footer when adjacent sessions exist. The header shows your current position (e.g., `2/4`).
+
+<Note>
+  Session switching only cycles through sessions in the **active project**. To jump to a session in a different project, close the terminal (`ESC`) and click a queue item in the activity sidebar.
+</Note>
+
+## Restarting a session
+
+Click the **↻** (restart) button in the terminal header to kill the current process and spawn a fresh PTY for the session using the same command and working directory. The existing scrollback remains visible until new output arrives.
+
+<Tip>
+  Restarting is useful when a session has crashed (`exited` status) or when Claude has reached its max-turns limit. You do not need to delete and recreate the session.
+</Tip>
+
+## Scrollback persistence
+
+Terminal output is buffered in memory during the session and periodically flushed to disk at `data/scrollback/<session-id>.buf` (debounced every 5 seconds, with a final flush on exit). When you re-open a terminal for a session that has already exited, xterm.js replays the preserved scrollback so you can review the full output.
+
+<Warning>
+  Scrollback files may contain sensitive information — API keys in environment output, file paths, secrets printed by commands. Clean `data/scrollback/` regularly if you use protected-agent sessions or work with sensitive repositories.
+</Warning>
+
+## Mobile support
+
+CC-GUI is usable on mobile devices. The terminal overlay detects touch capability and activates:
+
+- A **KB** button in the header that focuses a hidden `<textarea>` to trigger the software keyboard.
+- Quick-action buttons (`↵`, `Tab`, `↑`, `↓`) in the toolbar at the bottom for common key sequences that are hard to type on a touchscreen.
+- Swipe-to-switch gesture on the header area (60 px threshold) for carousel navigation.
+
+## Explore next
+
+<CardGroup cols={2}>
+  <Card title="Projects and Sessions" icon="folder" href="/concepts/projects-and-sessions">
+    Understand the project and session model that every terminal is built on.
+  </Card>
+  <Card title="Mobile Guide" icon="mobile" href="/guides/mobile">
+    Tips and controls for using CC-GUI comfortably on a phone or tablet.
+  </Card>
+</CardGroup>

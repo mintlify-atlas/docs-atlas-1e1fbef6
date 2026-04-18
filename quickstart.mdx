@@ -1,80 +1,84 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: "Get CC-GUI running in under five minutes"
+description: "Clone the repo, install dependencies, copy the data file, and start the dev server to have CC-GUI running locally with your first Claude Code session."
 ---
 
-## Get started in three steps
+CC-GUI needs two processes running at once: an Express + Socket.IO API server on port 3456, and a Vite dev server on port 5173. The `npm run dev` command starts both together. Follow the steps below to go from zero to your first live session.
 
-Get your documentation site running locally and make your first customization.
+<Note>
+  CC-GUI starts with safe mode on by default. The server binds to `127.0.0.1` and a **SAFE MODE ON** banner appears in the HUD. This is the recommended posture — do not expose CC-GUI to the public internet. See [Safe mode](/configuration/safe-mode) for details.
+</Note>
 
-### Step 1: Set up your local environment
+<Steps>
+  <Step title="Clone the repository and install dependencies">
+    Clone CC-GUI and install its Node.js dependencies. The install step compiles `node-pty`, which requires a C/C++ toolchain. See [Installation](/installation) if `npm install` fails.
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+    ```bash
+    git clone https://github.com/Haroutkhac/CC-GUI.git
+    cd CC-GUI
+    npm install
+    ```
+  </Step>
 
-### Step 2: Deploy your changes
+  <Step title="Copy the data store">
+    CC-GUI persists projects and sessions in `data/store.json`. Copy the example file to create your own local store:
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    ```bash
+    cp data/store.example.json data/store.json
+    ```
+  </Step>
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+  <Step title="Start the dev server">
+    Run both processes with a single command:
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+    ```bash
+    npm run dev
+    ```
 
-### Step 3: Go live
+    This starts:
+    - **API server** at `http://localhost:3456` — Express + Socket.IO, manages terminals and state
+    - **Vite dev server** at `http://localhost:5173` — React frontend with hot reload
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+    Open **http://localhost:5173** in your browser. You should see the CC-GUI HUD with the **SAFE MODE ON** banner.
+  </Step>
+
+  <Step title="Add a project">
+    Click **+ TABLE** in the top-right corner of the HUD, or press `N`. The project picker offers two sources:
+
+    - **GITHUB** — repos from your GitHub account (requires the `gh` CLI and `gh auth login`)
+    - **LOCAL** — git repos found in your home directory (scanned 3 levels deep)
+
+    Click any repo to add it, or choose **ENTER PATH MANUALLY** to type an absolute path.
+  </Step>
+
+  <Step title="Spawn a session">
+    With a project selected, press `S` to quick-spawn a session. CC-GUI starts a new `claude` process in the project's directory via a real PTY. The session card appears in the agent grid immediately.
+
+    <Tip>
+      To name the session or use a different command (e.g. `codex`, `bash`, or `npm run dev`), open the **GALLERY** view and click **+** instead.
+    </Tip>
+  </Step>
+
+  <Step title="Open the terminal">
+    Click any session card in the agent grid. This opens a full-screen xterm.js terminal attached to the session's PTY. Type prompts, approve tool use, and interact with Claude exactly as you would in your own shell.
+
+    Use the carousel at the bottom to switch between sessions in the same project without closing the terminal. On mobile, swipe left or right to navigate.
+  </Step>
+</Steps>
 
 ## Next steps
 
-Now that you have your docs running, explore these key features:
-
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Agent grid" icon="grid-2x2" href="/concepts/agent-grid">
+    Learn how sessions are sorted by priority and what each card state means.
+  </Card>
+  <Card title="Keyboard shortcuts" icon="keyboard" href="/guides/keyboard-shortcuts">
+    Speed up your workflow with shortcuts for spawning sessions and switching projects.
+  </Card>
+  <Card title="Safe mode" icon="shield" href="/configuration/safe-mode">
+    Understand the default security posture and how to configure it.
+  </Card>
+  <Card title="Troubleshooting" icon="wrench" href="/guides/troubleshooting">
+    Fix common issues with node-pty, missing commands, and blank screens.
+  </Card>
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

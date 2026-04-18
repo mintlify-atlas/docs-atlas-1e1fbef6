@@ -1,97 +1,66 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "CC-GUI docs: manage Claude Code sessions in your browser"
+description: "CC-GUI is a browser dashboard for managing multiple Claude Code sessions in parallel, with a live agent grid, activity sidebar, and full terminal access."
 ---
 
-## Setting up
+CC-GUI gives you a single browser window to spawn, monitor, and interact with multiple Claude Code sessions across all your projects. Every session runs in a real PTY on your machine and streams live output into an xterm.js terminal — no polling, no abstractions.
 
-Get your documentation site up and running in minutes.
-
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get CC-GUI running and launch your first Claude session in under five minutes.
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Installation" icon="download" href="/installation">
+    Prerequisites, native build dependencies, and install steps for macOS and Linux.
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="Core Concepts" icon="lightbulb" href="/concepts/projects-and-sessions">
+    Understand projects, sessions, the agent grid, and how CC-GUI ranks your work.
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="API Reference" icon="code" href="/api/overview">
+    REST endpoints and Socket.IO events for integrating with CC-GUI programmatically.
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## What CC-GUI does
 
-Everything you need to create world-class documentation.
+CC-GUI connects your local file system to a retro-themed dashboard where each Claude Code session appears as a card in an **agent grid**. The grid sorts sessions automatically by priority — sessions waiting for your input or hitting errors float to the top so you never miss a prompt.
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
+<CardGroup cols={2}>
+  <Card title="Agent grid" icon="grid-2" href="/concepts/agent-grid">
+    Live session cards sorted by priority: CRITICAL, HIGH, MEDIUM, and LOW.
   </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
+  <Card title="Activity sidebar" icon="sidebar" href="/concepts/activity-sidebar">
+    Cross-project alert feed and priority queue always visible on the right.
   </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
+  <Card title="Terminal overlay" icon="terminal" href="/concepts/terminal">
+    Full xterm.js terminal with PTY streaming, scrollback, and mobile swipe support.
   </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
+  <Card title="PR workflow" icon="code-pull-request" href="/guides/pr-workflow">
+    One-click PR creation with git worktree isolation per session.
   </Card>
-</Columns>
+</CardGroup>
 
-## Need inspiration?
+## Get started in three steps
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+<Steps>
+  <Step title="Clone and install">
+    ```bash
+    git clone https://github.com/Haroutkhac/CC-GUI.git
+    cd CC-GUI
+    npm install
+    cp data/store.example.json data/store.json
+    ```
+  </Step>
+  <Step title="Start the dev server">
+    ```bash
+    npm run dev
+    ```
+    This starts the Express API on port 3456 and the Vite frontend on port 5173. Open **http://localhost:5173** in your browser.
+  </Step>
+  <Step title="Add a project and spawn a session">
+    Click **+ TABLE** (or press `N`) to add a project directory, then press `S` to spawn a Claude Code session. Click the session card to open the terminal.
+  </Step>
+</Steps>
+
+<Note>
+  CC-GUI runs in safe mode by default, binding to `127.0.0.1` only. It is designed for local use and should not be exposed to the public internet.
+</Note>

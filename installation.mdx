@@ -1,0 +1,116 @@
+---
+title: "Installation: prerequisites and setup for CC-GUI"
+description: "Install Node.js, Claude Code CLI, and the required native build tools, then clone CC-GUI and run it in development or production mode."
+---
+
+CC-GUI runs as a local web application. The server manages real pseudoterminal processes via `node-pty`, which compiles native C/C++ code during `npm install`. Before you clone the repo, make sure the prerequisites below are in place.
+
+## Prerequisites
+
+| Dependency | Required | Purpose |
+|---|---|---|
+| [Node.js](https://nodejs.org/) 18+ | Yes | Runtime for the server and Vite build tools |
+| [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) | Yes | The `claude` command that sessions run by default |
+| [GitHub CLI](https://cli.github.com/) (`gh`) | No | Enables GitHub repo discovery in the project picker |
+
+Verify your environment before installing:
+
+```bash
+node --version    # should print v18.x or higher
+claude --version  # should print the Claude Code version
+gh auth status    # optional — should show "Logged in" if you want GitHub discovery
+```
+
+## Native build dependencies
+
+`node-pty` compiles a native Node.js addon and requires a C/C++ compiler on your system.
+
+<Tabs>
+  <Tab title="macOS">
+    Install the Xcode command-line tools if you haven't already:
+
+    ```bash
+    xcode-select --install
+    ```
+  </Tab>
+  <Tab title="Linux (Ubuntu/Debian)">
+    Install the build toolchain and Python:
+
+    ```bash
+    sudo apt install build-essential python3
+    ```
+  </Tab>
+</Tabs>
+
+<Warning>
+  If `npm install` fails with an error related to `node-pty`, a missing compiler is almost always the cause. Install the tools above and run `npm install` again.
+</Warning>
+
+## Installation
+
+Clone the repository and install dependencies:
+
+```bash
+git clone https://github.com/Haroutkhac/CC-GUI.git
+cd CC-GUI
+npm install
+```
+
+Copy the example data store to create your local store:
+
+```bash
+cp data/store.example.json data/store.json
+```
+
+CC-GUI reads and writes `data/store.json` to persist projects and sessions. The file is excluded from version control so your local data is never committed.
+
+## Running in development mode
+
+Development mode starts two processes concurrently:
+
+```bash
+npm run dev
+```
+
+- **API server** on `http://localhost:3456` — Express + Socket.IO, manages terminals and state
+- **Vite dev server** on `http://localhost:5173` — React frontend with hot reload
+
+Open **http://localhost:5173** in your browser. The Vite dev server proxies API requests to port 3456, so you only need to use port 5173 during development.
+
+## Running in production mode
+
+Build the React frontend into `dist/`, then start the server. In production mode, the server serves both the API and the compiled frontend from a single port:
+
+```bash
+npm run build    # compile the frontend into dist/
+npm start        # serve API and static files on :3456
+```
+
+Open **http://localhost:3456** in your browser.
+
+<Tip>
+  Production mode is useful when you want to run CC-GUI as a persistent background process, for example via `systemd` or `pm2`. Remember that safe mode still binds to `127.0.0.1` by default — see [Safe mode](/configuration/safe-mode) before exposing any port on your network.
+</Tip>
+
+## Authentication
+
+On first launch, CC-GUI creates a shared secret token at `~/.cc-gui/auth-token`. The frontend fetches this token automatically from `/api/auth-token` (only accessible from localhost). All `/api/*` routes and Socket.IO connections require the token.
+
+For remote access or custom clients, set the `VITE_AUTH_TOKEN` environment variable to the token value. See [Authentication](/configuration/authentication) for details.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Spawn your first session and open a terminal in under five minutes.
+  </Card>
+  <Card title="Safe mode" icon="shield" href="/configuration/safe-mode">
+    Understand how the server binding and CORS rules are enforced.
+  </Card>
+  <Card title="Environment variables" icon="sliders" href="/configuration/environment-variables">
+    Customize ports, allowed origins, and default session commands.
+  </Card>
+  <Card title="Troubleshooting" icon="wrench" href="/guides/troubleshooting">
+    Resolve node-pty build failures, missing commands, and other common issues.
+  </Card>
+</CardGroup>

@@ -1,0 +1,394 @@
+---
+title: "REST API reference for CC-GUI sessions"
+description: "Create, update, delete, and inspect CC-GUI sessions via HTTP. Covers diff, branch status, PR creation, and agent coordination endpoints."
+---
+
+A session is a single Claude Code (or any other CLI) process running inside a git worktree, streaming live terminal output to the browser. The sessions API gives you full control over the session lifecycle: spawn new agents, rename them, inspect their diffs and branch history, open pull requests, and send coordination messages to running agents — all over plain HTTP.
+
+All requests require the `Authorization: Bearer <token>` header. See [authentication](/configuration/authentication) for how to retrieve your token.
+
+## GET /api/sessions
+
+Returns an array of all sessions across every project.
+
+```bash
+curl http://localhost:3456/api/sessions \
+  -H "Authorization: Bearer <token>"
+```
+
+**Response**
+
+```json
+[
+  {
+    "id": "sess-uuid-1234",
+    "projectId": "proj-uuid-5678",
+    "name": "Refactor auth module",
+    "command": "claude",
+    "sessionType": "generic_terminal",
+    "baseCommand": "claude",
+    "unsafeCommand": false,
+    "status": "active",
+    "starter": "aria",
+    "claudeSessionId": "sess-uuid-1234",
+    "worktreePath": "/Users/you/.cc-gui/worktrees/sess-uuid-1234",
+    "branch": "cc-gui/aria-sess-uuid",
+    "createdAt": "2025-01-15T10:05:00.000Z"
+  }
+]
+```
+
+<ResponseField name="id" type="string" required>
+  UUID that uniquely identifies this session.
+</ResponseField>
+
+<ResponseField name="projectId" type="string" required>
+  ID of the parent project.
+</ResponseField>
+
+<ResponseField name="name" type="string" required>
+  Human-readable name shown on the session card in the agent grid.
+</ResponseField>
+
+<ResponseField name="command" type="string" required>
+  The shell command that will be (or was) spawned in the PTY. Defaults to `claude`.
+</ResponseField>
+
+<ResponseField name="sessionType" type="string" required>
+  `"protected_agent"` for commands listed in `PROTECTED_AGENT_COMMANDS`; `"generic_terminal"` for everything else.
+</ResponseField>
+
+<ResponseField name="baseCommand" type="string" required>
+  The base executable name extracted from `command` (e.g. `"claude"`, `"python"`).
+</ResponseField>
+
+<ResponseField name="unsafeCommand" type="boolean" required>
+  `true` if `baseCommand` is not on the built-in allowlist of known-safe commands.
+</ResponseField>
+
+<ResponseField name="status" type="string" required>
+  Current lifecycle state: `"idle"`, `"active"`, `"completed"`, or `"exited"`.
+</ResponseField>
+
+<ResponseField name="starter" type="string" required>
+  Retro agent name (e.g. `"aria"`, `"bex"`) assigned from the project's region roster.
+</ResponseField>
+
+<ResponseField name="claudeSessionId" type="string | null">
+  The Claude CLI session ID passed via `--session-id`. `null` until the process is first spawned.
+</ResponseField>
+
+<ResponseField name="worktreePath" type="string | null">
+  Absolute path to the git worktree for this session. `null` if the project is not a git repository.
+</ResponseField>
+
+<ResponseField name="branch" type="string | null">
+  The session's git branch (e.g. `"cc-gui/aria-sess-uuid"`). `null` if no worktree was created.
+</ResponseField>
+
+<ResponseField name="exitCode" type="number | null">
+  The exit code of the process. Only present after the process has exited.
+</ResponseField>
+
+<ResponseField name="createdAt" type="string" required>
+  ISO 8601 timestamp of when the session was created.
+</ResponseField>
+
+---
+
+## POST /api/sessions
+
+Creates a new session under the specified project. If the project directory is a git repository, CC-GUI automatically creates a dedicated worktree and branch for the session.
+
+**Request body**
+
+<ParamField body="projectId" type="string" required>
+  The ID of the project this session belongs to.
+</ParamField>
+
+<ParamField body="name" type="string">
+  Display name for the session. Defaults to `"New Session"` if omitted.
+</ParamField>
+
+<ParamField body="command" type="string">
+  Shell command to run in the PTY (e.g. `"claude"`, `"python3 main.py"`). Falls back to the `DEFAULT_SESSION_COMMAND` environment variable, which itself defaults to `"claude"`.
+</ParamField>
+
+```bash
+curl -X POST http://localhost:3456/api/sessions \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"projectId": "proj-uuid-5678", "name": "Refactor auth module"}'
+```
+
+**Response** — the newly created session object (same shape as in `GET /api/sessions`).
+
+**Error responses**
+
+| Status | Body | Reason |
+|--------|------|--------|
+| `404` | `{ "error": "project not found" }` | No project with the given `projectId` exists. |
+| `400` | `{ "error": "Project path does not exist: ..." }` | The project's directory no longer exists on disk. |
+
+<Note>
+  Worktree creation is attempted automatically for git repositories. If it fails (e.g. due to permissions), CC-GUI logs a warning and falls back to running the session directly in the project root. The session is still created successfully.
+</Note>
+
+---
+
+## DELETE /api/sessions/:id
+
+Kills the session's PTY process, removes its git worktree and branch (if any), and deletes the session record from the store.
+
+<Warning>
+  Deleting a session permanently removes its git worktree and branch. Any uncommitted work on that branch is lost. Create a PR first if you need to preserve the changes.
+</Warning>
+
+**Path parameters**
+
+<ParamField path="id" type="string" required>
+  The session ID.
+</ParamField>
+
+```bash
+curl -X DELETE http://localhost:3456/api/sessions/sess-uuid-1234 \
+  -H "Authorization: Bearer <token>"
+```
+
+**Response**
+
+```json
+{ "ok": true }
+```
+
+---
+
+## PATCH /api/sessions/:id
+
+Updates mutable fields on a session. Only `name` and `command` may be changed. When `command` is updated, CC-GUI re-classifies the command and updates `sessionType`, `baseCommand`, and `unsafeCommand` automatically.
+
+**Path parameters**
+
+<ParamField path="id" type="string" required>
+  The session ID.
+</ParamField>
+
+**Request body**
+
+<ParamField body="name" type="string">
+  New display name for the session.
+</ParamField>
+
+<ParamField body="command" type="string">
+  New command to run when the session next starts or restarts.
+</ParamField>
+
+```bash
+curl -X PATCH http://localhost:3456/api/sessions/sess-uuid-1234 \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Fix login bug"}'
+```
+
+**Response** — the updated session object.
+
+**Error responses**
+
+| Status | Body | Reason |
+|--------|------|--------|
+| `404` | `{ "error": "not found" }` | No session with the given ID exists. |
+
+---
+
+## GET /api/sessions/:id/diff
+
+Returns the diff detail computed by the AI orchestrator for a session — the list of changed files, the raw unified diff, and a human-readable summary.
+
+**Path parameters**
+
+<ParamField path="id" type="string" required>
+  The session ID.
+</ParamField>
+
+```bash
+curl http://localhost:3456/api/sessions/sess-uuid-1234/diff \
+  -H "Authorization: Bearer <token>"
+```
+
+**Response**
+
+```json
+{
+  "files": ["src/auth.ts", "src/utils.ts"],
+  "rawDiff": "diff --git a/src/auth.ts b/src/auth.ts\n...",
+  "summary": "Refactored auth module to use JWT. Updated utils to match."
+}
+```
+
+<ResponseField name="files" type="string[]" required>
+  List of file paths that have changed in this session's worktree.
+</ResponseField>
+
+<ResponseField name="rawDiff" type="string" required>
+  Full unified diff output as a string.
+</ResponseField>
+
+<ResponseField name="summary" type="string" required>
+  One or two sentence summary of the changes, generated by the AI orchestrator.
+</ResponseField>
+
+<Note>
+  If the orchestrator has not yet computed a diff for this session, the response is `{ "files": [], "rawDiff": "", "summary": "No data yet" }`.
+</Note>
+
+---
+
+## GET /api/sessions/:id/branch
+
+Returns the branch status for a session: how many commits have been made since the base branch, the commit list, and the name of the base branch.
+
+**Path parameters**
+
+<ParamField path="id" type="string" required>
+  The session ID.
+</ParamField>
+
+```bash
+curl http://localhost:3456/api/sessions/sess-uuid-1234/branch \
+  -H "Authorization: Bearer <token>"
+```
+
+**Response**
+
+```json
+{
+  "commitCount": 3,
+  "commits": [
+    {
+      "hash": "abc1234",
+      "message": "Add JWT validation",
+      "author": "aria",
+      "date": "2025-01-15T11:00:00.000Z"
+    }
+  ],
+  "base": "main"
+}
+```
+
+<ResponseField name="commitCount" type="number" required>
+  Number of commits ahead of the base branch.
+</ResponseField>
+
+<ResponseField name="commits" type="object[]" required>
+  List of commit objects. Each has `hash`, `message`, `author`, and `date`.
+</ResponseField>
+
+<ResponseField name="base" type="string" required>
+  Name of the base branch this session branched from (typically `"main"`).
+</ResponseField>
+
+<Note>
+  If no branch data exists yet, the response is `{ "commitCount": 0, "commits": [], "base": "main" }`.
+</Note>
+
+---
+
+## POST /api/sessions/:id/create-pr
+
+Creates a GitHub pull request for the session's branch. Requires `gh` CLI to be installed and authenticated. The PR title and body are generated automatically from the session's commit history and diff summary.
+
+**Path parameters**
+
+<ParamField path="id" type="string" required>
+  The session ID.
+</ParamField>
+
+```bash
+curl -X POST http://localhost:3456/api/sessions/sess-uuid-1234/create-pr \
+  -H "Authorization: Bearer <token>"
+```
+
+**Response**
+
+```json
+{
+  "success": true,
+  "prUrl": "https://github.com/owner/repo/pull/42"
+}
+```
+
+<ResponseField name="success" type="boolean" required>
+  `true` if the PR was created successfully.
+</ResponseField>
+
+<ResponseField name="prUrl" type="string">
+  The URL of the newly created pull request. Only present when `success` is `true`.
+</ResponseField>
+
+<ResponseField name="error" type="string">
+  Error message if `success` is `false`.
+</ResponseField>
+
+<Tip>
+  You can also trigger PR creation via Socket.IO by emitting `ai:create-pr` with `{ sessionId }`. See [orchestrator API](/api/orchestrator).
+</Tip>
+
+---
+
+## POST /api/sessions/:id/coordinate
+
+Sends a text message to the Claude agent running in this session. The message is injected as terminal input, prefixed to guide the agent toward a specific goal or share context from another session.
+
+**Path parameters**
+
+<ParamField path="id" type="string" required>
+  The session ID.
+</ParamField>
+
+**Request body**
+
+<ParamField body="message" type="string" required>
+  The coordination message to send to the agent.
+</ParamField>
+
+```bash
+curl -X POST http://localhost:3456/api/sessions/sess-uuid-1234/coordinate \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Session bex has already updated src/utils.ts — avoid touching that file."}'
+```
+
+**Response**
+
+```json
+{ "sent": true }
+```
+
+<ResponseField name="sent" type="boolean" required>
+  `true` if the message was dispatched to the agent.
+</ResponseField>
+
+**Error responses**
+
+| Status | Body | Reason |
+|--------|------|--------|
+| `400` | `{ "error": "message required" }` | The `message` field was missing or empty. |
+
+---
+
+## Related pages
+
+<CardGroup cols={2}>
+  <Card title="Projects API" icon="folder" href="/api/projects">
+    Create and manage the projects that contain sessions.
+  </Card>
+  <Card title="Orchestrator API" icon="sliders" href="/api/orchestrator">
+    Real-time Socket.IO events for terminal data, diffs, and session status.
+  </Card>
+  <Card title="PR workflow guide" icon="code-pull-request" href="/guides/pr-workflow">
+    End-to-end walkthrough of CC-GUI's git worktree and PR workflow.
+  </Card>
+  <Card title="Concepts: projects and sessions" icon="lightbulb" href="/concepts/projects-and-sessions">
+    Background on how projects and sessions relate in CC-GUI.
+  </Card>
+</CardGroup>

@@ -1,0 +1,78 @@
+---
+title: "Authentication: protecting API routes and terminal access"
+description: "CC-GUI generates a local auth token on first launch and uses it to protect all API routes and Socket.IO connections from unauthorized access."
+---
+
+Every route under `/api/*` and every Socket.IO connection in CC-GUI is protected by a shared secret token. Because the server spawns real terminal processes and gives the browser full shell access, this token is the only thing standing between an attacker and your machine. CC-GUI generates it automatically on first launch so you do not need to configure anything for local use — but you do need to understand it if you are working remotely or building a custom client.
+
+## How the token is generated
+
+On first launch, `server/auth.js` checks for an existing token at `~/.cc-gui/auth-token`. If the file does not exist or contains a token shorter than 64 characters, a new 32-byte random token is generated with `crypto.randomBytes` and written to that file with `0o600` permissions (owner read/write only).
+
+The token is a 64-character lowercase hex string. It is stable across restarts — the server reads the same file every time unless you delete it.
+
+```bash
+# View your current token
+cat ~/.cc-gui/auth-token
+```
+
+## How the frontend uses the token
+
+For local development, the frontend automatically fetches the token from `/api/auth-token` before connecting. That endpoint is served without authentication, but the server checks the request's IP address and only responds to connections from `127.0.0.1` or `::1`. Remote clients receive a `403`.
+
+Once the frontend has the token, it includes it in every subsequent request:
+
+- **HTTP requests** — as an `Authorization: Bearer <token>` header on all `/api/*` calls.
+- **Socket.IO** — as `socket.handshake.auth.token` during the WebSocket handshake.
+
+If either check fails, the server returns `401` (missing token) or `403` (wrong token), and the connection is rejected.
+
+## Remote dev and custom clients
+
+When you are not running the frontend from `localhost` — for example, in a remote dev environment or when building a custom client — the automatic token fetch from `/api/auth-token` will be blocked. Set `VITE_AUTH_TOKEN` to the token value before starting the Vite dev server:
+
+<Steps>
+  <Step title="Read the token from your server machine">
+    ```bash
+    cat ~/.cc-gui/auth-token
+    ```
+  </Step>
+  <Step title="Set VITE_AUTH_TOKEN before starting the frontend">
+    ```bash
+    VITE_AUTH_TOKEN=<your-token-here> npm run dev
+    ```
+    Or export it in your shell profile if you use this regularly:
+    ```bash
+    export VITE_AUTH_TOKEN=<your-token-here>
+    ```
+  </Step>
+  <Step title="Open the frontend in your browser">
+    The frontend reads `VITE_AUTH_TOKEN` at build/start time and uses it instead of fetching from `/api/auth-token`. All API calls and the Socket.IO handshake are authenticated automatically.
+  </Step>
+</Steps>
+
+<Warning>
+The auth token grants full shell access to your machine — anyone who has it can run arbitrary commands, read files, and view session transcripts. Treat it like a password. Do not commit it to version control, do not share it in logs, and rotate it by deleting `~/.cc-gui/auth-token` and restarting the server if you believe it has been compromised.
+</Warning>
+
+## Rotating the token
+
+Delete the token file and restart the server. A new token is generated automatically on the next launch.
+
+```bash
+rm ~/.cc-gui/auth-token
+npm run dev   # or npm start
+```
+
+Any existing frontend sessions will lose their connection and need to re-authenticate.
+
+## Related pages
+
+<CardGroup cols={2}>
+  <Card title="Safe mode" icon="shield" href="/configuration/safe-mode">
+    How safe mode restricts network access and CORS origins.
+  </Card>
+  <Card title="Environment variables" icon="sliders" href="/configuration/environment-variables">
+    Full reference for VITE_AUTH_TOKEN and other startup variables.
+  </Card>
+</CardGroup>

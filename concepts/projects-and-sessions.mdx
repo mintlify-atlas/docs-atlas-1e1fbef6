@@ -1,0 +1,68 @@
+---
+title: "Projects and Sessions: Tables and Pokémon in CC-GUI"
+description: "Learn how CC-GUI organizes work into projects (Tables) mapped to disk directories and sessions (Pokémon) that run real PTY processes in those directories."
+---
+
+CC-GUI structures your work around two fundamental building blocks: **projects** and **sessions**. Projects give each codebase a home in the dashboard, and sessions are the live agents doing work inside that home. Understanding the relationship between them is the foundation for everything else in CC-GUI.
+
+## Projects — "Tables"
+
+In CC-GUI's retro Pokémon-inspired interface, projects are called **Tables**. Each Table maps to a single directory on your machine — typically the root of a Git repository, though any directory works.
+
+When you create a project you either:
+
+- Pick a repo from the **GITHUB** discovery list (repos on your GitHub account, filtered by clone status), or
+- Pick a repo from the **LOCAL** discovery list (Git repos found up to 3 levels deep in your home directory), or
+- Type an absolute path manually.
+
+The project stores the path, a display name, and a region assignment (which determines the pool of Pokémon names assigned to new sessions). Projects are persisted to `data/store.json` and survive server restarts.
+
+<Note>
+  You can have as many projects open as you like. The HUD shows one tab per project. Click a tab to make it active — the agent grid updates to show only that project's sessions.
+</Note>
+
+## Sessions — "Pokémon"
+
+Sessions are the agents that do actual work. Each session runs a command — `claude` by default, though you can substitute anything: `codex`, `bash`, `npm run dev`, etc. — inside the project's directory using a real **PTY** (pseudo-terminal) spawned by `node-pty` on the server.
+
+Because each session is a genuine PTY, it is indistinguishable from a terminal you open yourself: full color support, interactive prompts, signals, resizing — everything works.
+
+### Git worktree isolation
+
+When a project is a Git repository, each session gets its own isolated branch and working tree. The branch name follows the pattern `cc-gui/<starter>-<id>`, where `<starter>` is the Pokémon name assigned to the session (e.g., `cc-gui/bulbasaur-3f2a`). This means multiple sessions can work on the same codebase simultaneously without stepping on each other's changes.
+
+<Warning>
+  If two sessions modify the same file, CC-GUI's conflict detector will flag the overlap in the agent grid. Check the card for a **CONFLICT** or **overlap** badge and resolve before merging.
+</Warning>
+
+### Session lifecycle
+
+A session moves through a well-defined set of states from creation to completion:
+
+<Steps>
+  <Step title="idle">
+    The session exists in the store but no PTY has been started yet. The card appears in the grid but shows no activity.
+  </Step>
+  <Step title="active">
+    A PTY has been spawned and the command is running. The orchestrator begins ingesting output to determine priority.
+  </Step>
+  <Step title="completed">
+    The process exited cleanly (exit code 0). The card is promoted to MEDIUM priority so you know to review the output.
+  </Step>
+  <Step title="exited">
+    The process exited with a non-zero code. The card is promoted to HIGH priority and labeled with the exit code so you can investigate.
+  </Step>
+</Steps>
+
+Scrollback from completed and exited sessions is persisted to disk (`data/scrollback/<session-id>.buf`) so re-opening the terminal still shows the full history.
+
+## Explore next
+
+<CardGroup cols={2}>
+  <Card title="Agent Grid" icon="grid-2" href="/concepts/agent-grid">
+    See how sessions are displayed as priority-sorted cards and what each card shows.
+  </Card>
+  <Card title="Terminal Overlay" icon="terminal" href="/concepts/terminal">
+    Open a full xterm.js terminal attached to any session's PTY with one click.
+  </Card>
+</CardGroup>
